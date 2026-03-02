@@ -25,10 +25,10 @@ jobs:
           npm install terser html-minifier-terser --no-save
 
           # Minify JS bundle
-          npx terser dist/app.bundle.js \
+          npx terser dist/easytrace5000/app.bundle.js \
             --compress --mangle \
             --comments '/^!/' \
-            -o dist/app.bundle.js
+            -o dist/easytrace5000/app.bundle.js
 
           # Minify theme-loader.js
           npx terser dist/themes/theme-loader.js \
