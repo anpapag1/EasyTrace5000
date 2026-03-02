@@ -4,8 +4,19 @@ All notable changes to the **EasyTrace5000** project will be documented in this 
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## Unreleased
-- **Laser Pipeline:**  I am looking for hardware partners and sponsors, especially laser manufacturers to help hasten laser pipeline development. <3
+
+## [1.0.7] - 2026-03-02
+
+### Added
+- **1st Draft of Laser Pipeline:** All Laser operations are now available for testing. The automated Hybrid (Laser+CNC) pipeline is locked (or just not finished yet depending on how you look at it).
+- **Source file Highlight:** Added small onboarding highlight animation on a timer to guide new users into triggering the workflow UI changes.
+
+### Fixed
+- **Boolean Add/Diff Arc Data Flaws. :** Arc data should now be more consistently passed through Clipper2 Wrapper functions.
+
+### Changed
+- **Moved EasyTrace5000 out of Root:** Now the application itself is accessible through the [easytrace5000/](https://cam.eltryus.design/easytrace5000/) folder to try and appease crawler bots and get the subdomain listed again.
+- **File Extensions are set automatically:** The User only needs to input the file name and the pipeline handles the file extensions.
 
 ## [1.0.6] - 2026-02-12
 

@@ -54,6 +54,7 @@ const CONFIG = {
         'geometry/geometry-arc-reconstructor.js',
         'geometry/geometry-clipper-wrapper.js',
         'geometry/geometry-utils.js',
+        'geometry/geometry-utils-hatching.js',
         'geometry/geometry-offsetter.js',
         'parsers/primitives.js',
         'parsers/parser-core.js',
@@ -79,17 +80,18 @@ const CONFIG = {
         'toolpath/toolpath-machine-processor.js',
         'toolpath/toolpath-tab-planner.js',
         'toolpath/toolpath-geometry-translator.js',
-        'gcode/processors/base-processor.js',
-        'gcode/processors/grbl-processor.js',
-        'gcode/processors/grblHAL-processor.js',
-        'gcode/processors/roland-processor.js',
-        'gcode/processors/marlin-processor.js',
-        'gcode/processors/mach3-processor.js',
-        'gcode/processors/linuxcnc-processor.js',
-        'gcode/gcode-generator.js',
+        'export/processors/base-processor.js',
+        'export/processors/grbl-processor.js',
+        'export/processors/grblHAL-processor.js',
+        'export/processors/roland-processor.js',
+        'export/processors/marlin-processor.js',
+        'export/processors/mach3-processor.js',
+        'export/processors/linuxcnc-processor.js',
+        'export/gcode-generator.js',
+        'export/laser-image-exporter.js',
         'utils/coordinate-system.js',
         'utils/unit-converter.js',
-        'utils/svg-exporter.js',
+        'utils/canvas-exporter.js',
         'cam-core.js',
         'cam-ui.js',
         'cam-controller.js'
@@ -97,10 +99,11 @@ const CONFIG = {
 
     // Documentation pages to process (CSS inlining only)
     docPages: [
-        'doc/index.html',
-        'doc/cnc.html', 
-        'doc/laser.html',
-        'doc/accessibility.html'
+        'index.html',
+        'easytrace5000/doc/index.html',
+        'easytrace5000/doc/cnc.html', 
+        'easytrace5000/doc/laser.html',
+        'easytrace5000/doc/accessibility.html'
     ],
 
     // CSS files for documentation pages
@@ -333,7 +336,7 @@ class Builder {
         );
 
         // Modify init() to prefer embedded tools
-        const oldInit = /async init\(\) \{[\s\S]*?try \{[\s\S]*?\/\/ Load from external file \(single source of truth\)[\s\S]*?const loaded = await this\.loadFromFile\('tools\.json'\);/;
+        const oldInit = /async init\(\) \{[\s\S]*?try \{[\s\S]*?const loaded = await this\.loadFromFile\('[^']*tools\.json'\);/;
 
         const newInit = `async init() {
             if (this.isLoaded) return true;
@@ -374,11 +377,11 @@ class Builder {
             .filter(Boolean)
             .join('\n\n');
 
-        const htmlPath = path.join(this.distDir, 'index.html');
+        const htmlPath = path.join(this.distDir, 'easytrace5000/index.html');
         let html = readFile(htmlPath);
 
         // Remove CSS link tags
-        html = html.replace(/<link rel="stylesheet" href="css\/[^"]+\.css">\s*/g, '');
+        html = html.replace(/<link rel="stylesheet" href="(\.\.\/){0,2}css\/[^"]+\.css">\s*/g, '');
 
         // Remove CSS architecture comment
         html = html.replace(/\s*<!-- Modular CSS Architecture -->\s*/g, '\n    ');
@@ -389,8 +392,6 @@ class Builder {
 
         writeFile(htmlPath, html);
 
-        // Delete CSS folder
-        deleteDir(path.join(this.distDir, 'css'));
         log(`  Inlined ${(this.stats.css / 1024).toFixed(1)}KB CSS`);
     }
 
@@ -420,7 +421,7 @@ class Builder {
             let html = readFile(pagePath);
 
             // Remove CSS link tags
-            html = html.replace(/<link rel="stylesheet" href="(\.\.\/)?css\/[^"]+\.css">\s*/g, '');
+            html = html.replace(/<link rel="stylesheet" href="(\.\.\/){0,2}css\/[^"]+\.css">\s*/g, '');
 
             // Insert inline style before </head>
             const styleTag = `\n    <!-- BUILD: Inlined CSS -->\n    <style>\n${cssContents}\n    </style>\n`;
@@ -460,7 +461,7 @@ class Builder {
                 if (file.includes('clipper2z')) {
                     content = content.replace(
                         /["'](\.?\/)?(geometry\/)?clipper2z\.wasm["']/g,
-                        '"geometry/clipper2z.wasm"'
+                        '"../geometry/clipper2z.wasm"'
                     );
                 }
 
@@ -471,7 +472,7 @@ class Builder {
             .join('\n');
 
         const bundle = header + jsContents;
-        const bundlePath = path.join(this.distDir, CONFIG.bundleName);
+        const bundlePath = path.join(this.distDir, 'easytrace5000', CONFIG.bundleName);
         writeFile(bundlePath, bundle);
 
         // Files to preserve (used by doc pages separately)
@@ -511,7 +512,7 @@ class Builder {
     updateHTML() {
         log('Updating HTML script references...');
 
-        const htmlPath = path.join(this.distDir, 'index.html');
+        const htmlPath = path.join(this.distDir, 'easytrace5000/index.html');
         let html = readFile(htmlPath);
 
         // Remove all deferred script tags (the individual JS files, including theme-loader)
@@ -545,6 +546,9 @@ class Builder {
 
     cleanup() {
         log('Cleaning up empty directories...');
+
+        // CSS was inlined into all pages, safe to remove
+        deleteDir(path.join(this.distDir, 'css'));
 
         // Clean any remaining empty directories
         const cleanEmptyDirs = (dir) => {

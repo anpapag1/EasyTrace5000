@@ -40,30 +40,30 @@
         'exampleSMD1': {
             name: 'Example 1 - SMD',
             files: {
-                isolation: 'examples/exampleSMD1/isolation.gbr',
-                drill: 'examples/exampleSMD1/drill.drl',
-                clearing: 'examples/exampleSMD1/clearing.gbr',
-                cutout: 'examples/exampleSMD1/cutout.gbr'
+                isolation: '../examples/exampleSMD1/isolation.gbr',
+                drill: '../examples/exampleSMD1/drill.drl',
+                clearing: '../examples/exampleSMD1/clearing.gbr',
+                cutout: '../examples/exampleSMD1/cutout.gbr'
             }
         },
         'exampleThroughHole1': {
             name: 'Example 2 - Through-Hole',
             files: {
-                isolation: 'examples/exampleThroughHole1/Gerber_BottomLayer.gbl',
-                drill: 'examples/exampleThroughHole1/Excellon_PTH_Through.drl',
-                cutout: 'examples/exampleThroughHole1/Gerber_BoardOutlineLayer.gko'
+                isolation: '../examples/exampleThroughHole1/Gerber_BottomLayer.gbl',
+                drill: '../examples/exampleThroughHole1/Excellon_PTH_Through.drl',
+                cutout: '../examples/exampleThroughHole1/Gerber_BoardOutlineLayer.gko'
             }
         },
         'line': {
             name: 'Line Test',
             files: {
-                isolation: 'examples/LineTest.svg'
+                isolation: '../examples/LineTest.svg'
             }
         },
         'calibration': {
             name: '100mm Step/mm Square',
             files: {
-                cutout: 'examples/100mmSquare.svg'
+                cutout: '../examples/100mmSquare.svg'
             }
         }
     };
@@ -103,6 +103,136 @@
 
             // Queued files for processing
             this.queuedFiles = [];
+
+            // Pipeline state — drives UI behavior across all modules
+            this.pipelineState = {
+                type: 'cnc',        // 'cnc' | 'laser' | 'hybrid'
+                laser: null         // null for CNC, object for laser/hybrid
+            };
+        }
+
+        /**
+         * Sets the active pipeline. Called from laser config modal or welcome card.
+         */
+        setPipeline(type, laserConfig = null) {
+            this.pipelineState.type = type;
+            this.pipelineState.laser = laserConfig;
+
+            // Persist to localStorage so reload remembers pipeline choice
+            try {
+                localStorage.setItem('pcbcam-pipeline', JSON.stringify(this.pipelineState));
+            } catch (e) { /* ignore */ }
+
+            this.debug(`Pipeline set: ${type}`, laserConfig);
+            return this.pipelineState;
+        }
+
+        /**
+         * Restores pipeline state from localStorage on init.
+         * Called during initialize() after core is ready.
+         */
+        restorePipeline() {
+            try {
+                const saved = localStorage.getItem('pcbcam-pipeline');
+                if (saved) {
+                    const parsed = JSON.parse(saved);
+                    if (parsed.type && ['cnc', 'laser', 'hybrid'].includes(parsed.type)) {
+                        // Merge with defaults to handle missing fields from older versions
+                        this.pipelineState = {
+                            type: parsed.type,
+                            laser: parsed.laser ? { ...this.pipelineState.laser, ...parsed.laser } : null
+                        };
+                        this.debug('Restored pipeline state:', this.pipelineState);
+                    }
+                }
+            } catch (e) { /* ignore, use defaults */ }
+        }
+
+        /**
+         * Auto-upgrades laser → hybrid when a CNC operation type is added.
+         * Called from processFile() after operation is created.
+         */
+        checkHybridUpgrade(operationType) {
+            // HYBRID LOCK: Disabled until laser operations are fully verified.
+            if (this.pipelineState.type === 'laser') {
+                this.debug(`Hybrid upgrade blocked for ${operationType} — feature locked.`);
+                return false; 
+            }
+
+            if (this.pipelineState.type !== 'laser') return false;
+
+            const cncTypes = ['drill', 'cutout', 'clearing'];
+            if (cncTypes.includes(operationType)) {
+                this.pipelineState.type = 'hybrid';
+                try {
+                    localStorage.setItem('pcbcam-pipeline', JSON.stringify(this.pipelineState));
+                } catch (e) { /* ignore */ }
+
+                this.debug('Auto-upgraded to hybrid pipeline');
+
+                // Trigger UI updates for the new hybrid state
+                if (this.ui?.controls) {
+                    this.ui.controls.updatePipelineFieldVisibility();
+                }
+                if (this.ui?.navTreePanel) {
+                    this.ui.navTreePanel.refreshTree();
+                }
+                return true;
+            }
+            return false;
+        }
+
+        /**
+         * Returns operation types available for the current pipeline.
+         */
+        getActiveOperationTypes() {
+            const state = this.pipelineState;
+
+            if (state.type === 'cnc') {
+                return ['isolation', 'drill', 'clearing', 'cutout'];
+            }
+
+            // Laser ops — always available
+            const ops = ['laser_isolation', 'laser_mask', 'laser_stencil', 'laser_silkscreen', 'laser_marking'];
+
+            // Capability-gated laser ops
+            if (state.laser?.capabilities?.canReflow) {
+                ops.push('laser_reflow');
+            }
+
+            // CNC ops available in laser mode (for hybrid potential)
+            if (state.laser?.capabilities?.canDrill) {
+                ops.push('drill');
+            }
+            if (state.laser?.capabilities?.canCut) {
+                ops.push('cutout');
+            }
+
+            // If already hybrid, ensure CNC ops are included
+            if (state.type === 'hybrid') {
+                if (!ops.includes('drill')) ops.push('drill');
+                if (!ops.includes('cutout')) ops.push('cutout');
+            }
+
+            return ops;
+        }
+
+        /**
+         * Quick check used across UI modules.
+         */
+        isLaserPipeline() {
+            return this.pipelineState.type === 'laser' || this.pipelineState.type === 'hybrid';
+        }
+        
+        /**
+         * Returns true if this specific operation type should use laser export in the current pipeline. CNC ops in Hybrid mode may use G-code instead.
+         */
+        isLaserExportForOperation(operationType) {
+            if (this.pipelineState.type === 'laser') return true;
+            if (this.pipelineState.type === 'hybrid') {
+                return operationType === 'isolation' || operationType === 'clearing';
+            }
+            return false;
         }
 
         async initialize() {
@@ -116,8 +246,11 @@
                 this.parameterManager = new ParameterManager();
                 this.languageManager = new LanguageManager();
 
-                // Load the language file beforethe UI
+                // Load the language file before the UI
                 await this.languageManager.load();
+
+                // Restore pipeline state before UI init so components can read it
+                this.restorePipeline();
 
                 // Instantiate pipeline components *after* core exists
                 this.gcodeGenerator = new GCodeGenerator(config.gcode);
@@ -152,6 +285,11 @@
                 if (!wasmReady) {
                     console.warn('WASM modules failed to load - running in fallback mode');
                     this.ui?.updateStatus(textConfig.statusWarning || 'Warning: Clipper2 failed to load - fusion disabled', 'warning');
+                }
+
+                // Sync pipeline UI state after all components are ready
+                if (this.isLaserPipeline() && this.ui?.controls) {
+                    this.ui.controls.updatePipelineFieldVisibility();
                 }
 
                 // Setup global event handlers
@@ -310,31 +448,31 @@
             if (manageToolpathsBtn) {
                 manageToolpathsBtn.addEventListener('click', () => {
                     // Collect operations with previews
-                    const readyOps = this.core.operations.filter(op => op.preview);
+                    const readyOps = this.core.operations.filter(op => this.core.isExportReady(op));
                     if (readyOps.length === 0) {
                         this.ui?.updateStatus('No operations ready. Generate previews first.', 'warning');
                         return;
                     }
-                    this.modalManager.showToolpathModal(readyOps);
+                    this.modalManager.showModal('exportManager', { operations: readyOps });
                     quickActionsBtn.classList.remove('active');
                     quickActionsMenu.classList.remove('show');
                 });
             }
 
-            const exportSvgBtn = document.getElementById('toolbar-export-svg');
-            if (exportSvgBtn) {
-                exportSvgBtn.addEventListener('click', async () => {
-                    if (!this.ui?.svgExporter) {
-                        this.ui?.updateStatus('SVG exporter not available', 'error');
+            const exportCvsBtn = document.getElementById('toolbar-export-canvas');
+            if (exportCvsBtn) {
+                exportCvsBtn.addEventListener('click', async () => {
+                    if (!this.ui?.canvasExporter) {
+                        this.ui?.updateStatus('Canvas exporter not available', 'error');
                         return;
                     }
 
                     try {
-                        this.ui.svgExporter.exportSVG();
-                        this.ui?.updateStatus('SVG exported successfully', 'success');
+                        this.ui.canvasExporter.exportCanvasSVG();
+                        this.ui?.updateStatus('Canvas exported successfully', 'success');
                     } catch (error) {
-                        console.error('SVG export error:', error);
-                        this.ui?.updateStatus('SVG export failed: ' + error.message, 'error');
+                        console.error('Canvas export error:', error);
+                        this.ui?.updateStatus('Canvas' + error.message, 'error');
                     }
 
                     quickActionsBtn.classList.remove('active');
@@ -874,8 +1012,7 @@
 
                     // Update tree with geometry info if using advanced UI
                     if (this.ui?.navTreePanel) {
-                        const fileNode = Array.from(this.ui.navTreePanel.nodes.values())
-                            .find(n => n.operation?.id === operation.id);
+                        const fileNode = this.ui.navTreePanel.getNodeByOperationId(operation.id);
                         if (fileNode) {
                             this.ui.navTreePanel.updateFileGeometries(fileNode.id, operation);
                         }
@@ -1180,44 +1317,166 @@
             };
         }
 
-        async exportSVG() {
-            if (this.ui?.exportSVG) {
-                await this.ui.exportSVG();
-                return;
+        /**
+         * Orchestrates laser export for the given operations.
+         * Preserves the pass hierarchy so the exporter can assign distinct colors per hatch angle and apply correct stroke/fill per strategy.
+         */
+        async orchestrateLaserExport(operations, exportOptions = {}) {
+            this.debug(`Orchestrating laser export for ${operations.length} operation(s)`);
+
+            if (!operations || operations.length === 0) {
+                this.ui?.updateStatus('No operations to export', 'warning');
+                return { success: false };
             }
 
-            if (!this.ui?.svgExporter || !this.ui?.renderer) {
-                this.ui?.updateStatus('SVG export not available', 'error');
-                return;
+            const spotSize = this.core.settings?.laser?.spotSize || 0.05;
+            const format = exportOptions.format || this.core.settings?.laser?.exportFormat || 'svg';
+            const dpi = exportOptions.dpi || this.core.settings?.laser?.exportDPI || 1000;
+            const padding = exportOptions.padding ?? config.laserDefaults?.exportPadding ?? 5.0;
+            const singleFile = exportOptions.singleFile !== false; // default true
+            const baseName = exportOptions.baseName || 'pcb-output';
+
+            // Build coordinate transforms
+            const transforms = {
+                origin: this.core.coordinateSystem?.getOriginPosition() || { x: 0, y: 0 },
+                rotation: this.core.coordinateSystem?.currentRotation || 0,
+                rotationCenter: this.core.coordinateSystem?.rotationCenter || null,
+                mirrorX: this.core.coordinateSystem?.mirrorX || false,
+                mirrorY: this.core.coordinateSystem?.mirrorY || false,
+                mirrorCenter: this.core.coordinateSystem?.boardBounds ? {
+                    x: this.core.coordinateSystem.boardBounds.centerX,
+                    y: this.core.coordinateSystem.boardBounds.centerY
+                } : { x: 0, y: 0 }
+            };
+
+            const commonOptions = {
+                dpi, padding, transforms,
+                bounds: this.core.coordinateSystem?.boardBounds
+            };
+
+            // Build layer objects from operations
+            const buildLayer = (op) => {
+                if (!op.offsets || op.offsets.length === 0) return null;
+
+                const color = exportOptions.layerColors?.[op.type] || '#000000';
+                const passes = op.offsets.map((offset, idx) => ({
+                    passIndex: idx + 1,
+                    type: offset.type || 'offset',
+                    primitives: offset.primitives || [],
+                    metadata: offset.metadata || {}
+                }));
+
+                return {
+                    operationId: op.id,
+                    operationType: op.type,
+                    fileName: op.file.name,
+                    baseColor: color,
+                    layerName: op.type,
+                    strokeWidth: spotSize,
+                    passes
+                };
+            };
+
+            // PNG split: rasterizable ops vs vector-only ops
+            const isPNGFormat = format === 'png';
+            const rasterTypes = ['isolation', 'clearing'];
+
+            let layerGroups; // Array of { layers, format, filenameSuffix }
+
+            if (isPNGFormat) {
+                const rasterLayers = [];
+                const vectorLayers = [];
+
+                for (const op of operations) {
+                    const layer = buildLayer(op);
+                    if (!layer) continue;
+                    if (rasterTypes.includes(op.type)) {
+                        rasterLayers.push(layer);
+                    } else {
+                        vectorLayers.push(layer);
+                    }
+                }
+
+                layerGroups = [];
+                if (rasterLayers.length > 0) {
+                    layerGroups.push({ layers: rasterLayers, format: 'png', suffix: '' });
+                }
+                if (vectorLayers.length > 0) {
+                    layerGroups.push({ layers: vectorLayers, format: 'svg', suffix: '-vectors' });
+                }
+            } else if (singleFile) {
+                // All operations in one SVG
+                const allLayers = operations.map(buildLayer).filter(Boolean);
+                if (allLayers.length > 0) {
+                    layerGroups = [{ layers: allLayers, format: 'svg', suffix: '' }];
+                } else {
+                    layerGroups = [];
+                }
+            } else {
+                // Multi-file: one SVG per operation
+                layerGroups = [];
+                for (const op of operations) {
+                    const layer = buildLayer(op);
+                    if (!layer) continue;
+                    layerGroups.push({
+                        layers: [layer],
+                        format: 'svg',
+                        suffix: `-${op.type}`
+                    });
+                }
             }
+
+            if (layerGroups.length === 0) {
+                this.ui?.updateStatus('No geometry to export', 'warning');
+                return { success: false };
+            }
+
+            if (typeof LaserImageExporter === 'undefined') {
+                this.ui?.updateStatus('Laser image exporter module not loaded', 'error');
+                return { success: false };
+            }
+
+            const exporter = new LaserImageExporter();
+            let exportedCount = 0;
 
             try {
-                const svgString = this.ui.svgExporter.exportSVG({
-                    precision: 2,
-                    padding: 5,
-                    optimizePaths: true,
-                    includeMetadata: true,
-                    includeArcReconstructionStats: this.ui.fusionStats?.arcReconstructionEnabled
-                });
+                for (const group of layerGroups) {
+                    const ext = group.format === 'png' ? '.png' : '.svg';
 
-                if (svgString) {
-                    // Create download
-                    const blob = new Blob([svgString], { type: 'image/svg+xml' });
-                    const url = URL.createObjectURL(blob);
-                    const a = document.createElement('a');
-                    a.href = url;
-                    a.download = 'pcb-export.svg';
-                    a.click();
-                    URL.revokeObjectURL(url);
+                    // Assemble the filename using the provided baseName
+                    const filename = `${baseName}${group.suffix}${ext}`;
 
-                    this.ui.updateStatus('SVG exported successfully', 'success');
-                } else {
-                    this.ui.updateStatus('SVG export failed - no content to export', 'warning');
+                    const result = await exporter.generate(group.layers, {
+                        ...commonOptions,
+                        format: group.format
+                    });
+
+                    if (result && result.blob) {
+                        const url = URL.createObjectURL(result.blob);
+                        const a = document.createElement('a');
+                        a.href = url;
+                        a.download = filename;
+                        document.body.appendChild(a);
+                        a.click();
+                        document.body.removeChild(a);
+                        URL.revokeObjectURL(url);
+                        exportedCount++;
+                    }
+                }
+
+                if (exportedCount > 0) {
+                    const msg = exportedCount > 1
+                        ? `Exported ${exportedCount} laser files successfully`
+                        : `Laser ${format.toUpperCase()} exported successfully`;
+                    this.ui?.updateStatus(msg, 'success');
+                    return { success: true };
                 }
             } catch (error) {
-                console.error('SVG export error:', error);
-                this.ui?.updateStatus('SVG export failed: ' + error.message, 'error');
+                console.error('[Controller] Laser export failed:', error);
+                this.ui?.updateStatus('Laser export failed: ' + error.message, 'error');
             }
+
+            return { success: false };
         }
 
         // API for external access
@@ -1285,7 +1544,7 @@
             return;
         }
 
-        // Check for required core classes // Review - add all classes
+        // Check for required core classes // REVIEW - all classes are required
         const requiredClasses = [
             'PCBCamCore',
             'PCBCamUI',

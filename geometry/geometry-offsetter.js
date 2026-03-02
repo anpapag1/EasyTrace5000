@@ -173,11 +173,6 @@
                 primitive.type === 'elliptical_arc' || 
                 primitive.type === 'bezier') {
 
-                if (typeof GeometryUtils === 'undefined' || !GeometryUtils.primitiveToPath) {
-                    console.error(`[GeometryOffsetter] Cannot convert ${primitive.type}: GeometryUtils.primitiveToPath not available`);
-                    return null;
-                }
-
                 const convertedPrimitive = GeometryUtils.primitiveToPath(primitive);
                 if (!convertedPrimitive) {
                     console.warn(`[GeometryOffsetter] Failed to convert ${primitive.type} to path`);

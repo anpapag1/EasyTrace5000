@@ -32,7 +32,7 @@
     const geomConfig = config.geometry;
     const debugConfig = config.debug;
 
-    class SVGExporter {
+    class CanvasExporter {
         constructor(renderer) {
             this.renderer = renderer;
             this.core = renderer.core;
@@ -151,9 +151,9 @@
         }
 
         // Main Export
-        exportSVG(options = {}) {
+        exportCanvasSVG(options = {}) {
             const exportConfig = { ...this.options, ...options };
-            const filename = exportConfig.filename || 'pcb-export.svg';
+            const filename = exportConfig.filename || 'EasyTrace5000-CanvasContents.svg';
 
             this.core.calculateOverallBounds();
             const bounds = this.core.bounds;
@@ -892,9 +892,9 @@ Mode: ${vo.showWireframe ? 'Wireframe' : 'Solid'} | Geometry: ${vo.fuseGeometry 
         }
 
         debug(message) {
-            if (debugConfig.enabled) console.log(`[SVGExporter] ${message}`);
+            if (debugConfig.enabled) console.log(`[CanvasExporter] ${message}`);
         }
     }
 
-    window.SVGExporter = SVGExporter;
+    window.CanvasExporter = CanvasExporter;
 })();

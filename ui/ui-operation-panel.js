@@ -182,7 +182,24 @@
             }
 
             this.currentOperation = operation;
+
+            // Resolve pipeline type once
+            const pipelineType = window.pcbcam?.pipelineState?.type || 'cnc';
+            const isLaser = window.pcbcam?.isLaserPipeline?.() || false;
+
+            // Remap CNC-originated stages to laser equivalents
+            if (isLaser && (geometryStage === 'strategy' || geometryStage === 'machine')) {
+                const isReady = window.pcbcam?.core?.isExportReady(operation);
+                geometryStage = isReady ? 'export_summary' : 'geometry';
+            }
+
             this.currentGeometryStage = geometryStage;
+
+            // Export summary is display-only (no editable parameters)
+            if (geometryStage === 'export_summary') {
+                this.renderExportSummary(operation);
+                return;
+            }
 
             // Load existing parameters for this operation
             this.parameterManager.loadFromOperation(operation);
@@ -195,13 +212,19 @@
             title.textContent = operation.file.name;
             container.innerHTML = '';
 
+            // Invalidation Warning Panel
+            if (operation.isInvalidated) {
+                const invalidPanel = this.createInvalidationPanel(operation);
+                container.appendChild(invalidPanel);
+            }
+
             // Show warnings if any
             if (operation.warnings && operation.warnings.length > 0) {
                 container.appendChild(this.createWarningPanel(operation.warnings));
             }
 
             // Get appropriate parameters for this stage and operation type
-            const stageParams = this.parameterManager.getStageParameters(geometryStage, operation.type);
+            const stageParams = this.parameterManager.getStageParameters(geometryStage, operation.type, pipelineType);
             const currentValues = this.parameterManager.getParameters(operation.id, geometryStage);
 
             // Group parameters by category
@@ -226,6 +249,50 @@
             this.setupPropertyGridNavigation(container);
         }
 
+        createInvalidationPanel(operation) {
+            const template = document.getElementById('invalidation-panel-template');
+            if (!template) return document.createElement('div'); // Fallback if template missing
+
+            // Clone the template
+            const panelNode = template.content.cloneNode(true);
+            const panel = panelNode.querySelector('.invalidation-panel');
+            const msg = panel.querySelector('.warning-message');
+            const redoBtn = panel.querySelector('.invalidation-redo-btn');
+
+            // Apply specific text
+            msg.textContent = operation.invalidatedReason || 'Global machine settings have changed. Existing geometry is incompatible and must be regenerated.';
+
+            // Attach functionality
+            redoBtn.onclick = async () => {
+                // Clear the invalid geometry data
+                operation.offsets = [];
+                operation.preview = null;
+                operation.exportReady = false;
+                operation.isInvalidated = false;
+                operation.invalidatedReason = null;
+
+                // Remove the old visual layers from the canvas renderer
+                const layerKeys = Array.from(this.ui.renderer.layers.keys())
+                    .filter(key => key.includes(`_${operation.id}_`));
+                layerKeys.forEach(key => this.ui.renderer.layers.delete(key));
+
+                // Update the Nav Tree to remove the red strike-through nodes
+                if (this.ui.navTreePanel) {
+                    const fileNode = this.ui.navTreePanel.getNodeByOperationId(operation.id);
+                    if (fileNode) {
+                        this.ui.navTreePanel.updateFileGeometries(fileNode.id, operation);
+                    }
+                }
+
+                // Update canvas and reset side-panel view
+                await this.ui.updateRendererAsync();
+                this.switchGeometryStage('geometry');
+                this.ui.showStatus('Invalid geometry cleared. Ready to regenerate.', 'success');
+            };
+
+            return panel;
+        }
+
         groupByCategory(params) {
             const groups = {};
             for (const param of params) {
@@ -243,14 +310,28 @@
         }
 
         getActionButtonText(stage, operationType) {
+            const isLaser = window.pcbcam?.isLaserPipeline?.() || false;
+
+            // Laser stages
+            if (isLaser) {
+                if (stage === 'geometry') {
+                    if (operationType === 'cutout') return 'Generate Laser Cut Path';
+                    if (operationType === 'drill') return 'Generate Drill Marks';
+                    return 'Generate Laser Paths';
+                }
+                if (stage === 'export_summary') return 'Export Manager';
+                return null;
+            }
+
+            // CNC stages
             if (stage === 'geometry') {
                 if (operationType === 'drill') return 'Generate Drill Strategy';
                 if (operationType === 'cutout') return 'Generate Cutout Path';
                 return 'Generate Offsets';
             } else if (stage === 'strategy') {
-                return 'Generate Toolpath Preview';
+                return 'Generate Preview';
             } else if (stage === 'machine') {
-                return 'Operations & G-Code';
+                return 'Export Manager';
             }
             return null;
         }
@@ -363,6 +444,11 @@
                 input.setAttribute('aria-label', `${param.label} in ${param.unit}`);
             }
 
+            if (param.readOnly) {
+                input.readOnly = true;
+                input.classList.add('input-readonly');
+            }
+
             wrapper.appendChild(input);
 
             if (param.unit) {
@@ -452,10 +538,6 @@
         createWarningPanel(warnings) {
             const panel = document.createElement('div');
             panel.className = 'warning-panel';
-
-            if (inspectorConfig.warningPanelCSS) {
-                Object.assign(panel.style, inspectorConfig.warningPanelCSS);
-            }
 
             const header = document.createElement('div');
             if (inspectorConfig.warningHeaderCSS) {
@@ -563,7 +645,7 @@
                     this.showOperationProperties(this.currentOperation, this.currentGeometryStage);
                     await this.ui.updateRendererAsync();
 
-                    this.ui.statusManager?.showStatus(
+                    this.ui.showStatus(
                         `Switched to ${isMilling ? 'milling' : 'pecking'} mode`,
                         'info'
                     );
@@ -595,18 +677,27 @@
         }
 
         evaluateConditionals(container) {
-            const currentValues = this.parameterManager.getAllParameters(this.currentOperation.id);
+            if (!this.currentOperation) return;
+            const operation = this.currentOperation;
+            const currentValues = this.parameterManager.getAllParameters(operation.id);
 
             container.querySelectorAll('[data-conditional]').forEach(field => {
                 const conditional = field.dataset.conditional;
                 let shouldShow = true;
 
-                if (conditional.startsWith('!')) {
+                if (conditional.includes(':')) {
+                    // Value-based conditional: "paramName:val1,val2,val3"
+                    const colonIdx = conditional.indexOf(':');
+                    const paramName = conditional.substring(0, colonIdx);
+                    const allowedValues = conditional.substring(colonIdx + 1).split(',');
+                    const currentVal = String(currentValues[paramName] ?? '');
+                    shouldShow = allowedValues.includes(currentVal);
+                } else if (conditional.startsWith('!')) {
                     const paramName = conditional.slice(1);
-                    // Read the value from the manager, not the checkbox (which might be stale) // Review - can checkboxes become stale?
+                    // Read the value from the manager, not the checkbox (which might be stale) // REVIEW - can checkboxes become stale?
                     shouldShow = !currentValues[paramName];
                 } else {
-                    shouldShow = currentValues[conditional];
+                    shouldShow = !!currentValues[conditional];
                 }
 
                 field.style.display = shouldShow ? '' : 'none';
@@ -616,8 +707,10 @@
         onParameterChange(name, value, isRealtime = false) {
             if (!this.currentOperation) return;
 
+            const operation = this.currentOperation;
+
             const result = this.parameterManager.setParameter(
-                this.currentOperation.id,
+                operation.id,
                 this.currentGeometryStage,
                 name,
                 value
@@ -636,7 +729,7 @@
             } else {
                 // Show error and apply visual feedback
                 if (!isRealtime) {
-                    this.ui.statusManager?.showStatus(result.error, 'error');
+                    this.ui.showStatus(result.error, 'error');
                 }
 
                 if (inputEl) {
@@ -647,6 +740,34 @@
                 if (result.correctedValue !== undefined && inputEl) {
                     inputEl.value = result.correctedValue;
                     inputEl.classList.remove('input-error'); // Corrected, no longer in error
+                }
+            }
+
+            // Invalidate generated geometry when geometry-altering parameters change.
+            // This prevents stale paths from being exported after parameter edits.
+            if (operation && !isRealtime) {
+                const paramDef = this.parameterManager.parameterDefinitions[name];
+                if (paramDef && (paramDef.stage === 'geometry' || paramDef.stage === 'strategy')) {
+                    const isReady = window.pcbcam?.core?.isExportReady(operation);
+
+                    if (isReady) {
+                        operation.exportReady = false;
+                        if (operation.preview) {
+                            operation.preview.ready = false;
+                        }
+
+                        // Update tree node to remove stale geometry indicators
+                        if (this.ui.navTreePanel) {
+                            const fileNode = this.ui.navTreePanel.getNodeByOperationId(operation.id);
+                            if (fileNode) {
+                                this.ui.navTreePanel.updateFileGeometries(fileNode.id, operation);
+                            }
+                        }
+
+                        this.ui.showStatus(
+                            'Parameters changed — regenerate paths before exporting.', 'warning'
+                        );
+                    }
                 }
             }
 
@@ -681,30 +802,92 @@
 
         saveCurrentState() {
             if (!this.currentOperation) return;
+            const operation = this.currentOperation;
 
             // Commit to operation
-            this.parameterManager.commitToOperation(this.currentOperation);
+            this.parameterManager.commitToOperation(operation);
 
-            this.debug(`Saved state for operation ${this.currentOperation.id}`);
+            this.debug(`Saved state for operation ${operation.id}`);
         }
 
         async handleAction() {
-            this.saveCurrentState(); 
+            this.saveCurrentState();
 
-            const op = this.currentOperation; 
-            const stage = this.currentGeometryStage; 
+            const operation = this.currentOperation;
+            const stage = this.currentGeometryStage;
+            const isLaser = window.pcbcam?.isLaserPipeline?.() || false;
+            const transitionDelay = layoutConfig?.ui?.transitionDelay || 300;
 
-            if (stage === 'geometry') {
-                // Geometry -> Strategy
-                if (op.type === 'drill') { 
-                    await this.generateDrillStrategy(op); 
-                } else if (op.type === 'cutout') { 
-                    await this.generateCutoutOffset(op); 
-                } else {
-                    await this.generateOffsets(op); 
+            // ═══════════════════════════════════════
+            // LASER PIPELINE
+            // ═══════════════════════════════════════
+            if (isLaser && stage === 'geometry') {
+                // The offset engine is geometry-agnostic — generateLaserPaths translates laser params (spot size, isolation width) into offset engine inputs (toolDiameter, passes, stepOver).
+                await this.generateLaserPaths(operation);
+
+                // Mark operation as export-ready. In laser mode there's no separate preview step — the generated offsets ARE the exportable result.
+                // Set preview.ready so the Export Manager can filter ready operations.
+                if (operation.offsets && operation.offsets.length > 0) {
+                    const allPrimitives = [];
+                    operation.offsets.forEach(offset => {
+                        offset.primitives.forEach(prim => {
+                            if (!prim.properties) prim.properties = {};
+                            prim.properties.isPreview = true;
+                            allPrimitives.push(prim);
+                        });
+                    });
+
+                    // Mark operation as export-ready, the Export Manager checks this flag for laser operations.
+                    operation.exportReady = true;
+                    operation.exportMetadata = {
+                        generatedAt: Date.now(),
+                        sourceOffsets: operation.offsets.length,
+                        laserStrategy: operation.settings?.laserClearStrategy || 'offset'
+                    };
+
+                    this.ui.renderer?.setOptions({ showPreviews: true });
+                    const previewToggle = document.getElementById('show-previews');
+                    if (previewToggle) previewToggle.checked = true;
+
+                    await this.ui.updateRendererAsync();
+                    this.ui.showStatus('Laser paths generated — ready for export', 'success');
                 }
 
-                const transitionDelay = layoutConfig?.ui?.transitionDelay || 300;
+                if (layoutConfig?.ui?.autoTransition) {
+                    setTimeout(() => {
+                        this.switchGeometryStage('export_summary');
+                    }, transitionDelay);
+                }
+
+                this.returnFocusToTree();
+                return;
+            }
+
+            if (isLaser && stage === 'export_summary') {
+                const controller = window.pcbcam;
+                if (controller?.modalManager) {
+                    const readyOps = this.ui.core.operations.filter(o => this.ui.core.isExportReady(o));
+                    if (readyOps.length === 0) {
+                        this.ui.showStatus('No operations ready. Generate laser paths first.', 'warning');
+                        return;
+                    }
+                    controller.modalManager.showModal('exportManager', { operations: readyOps, highlightOperationId: operation.id });
+                }
+                return;
+            }
+
+            // ═══════════════════════════════════════
+            // CNC PIPELINE
+            // ═══════════════════════════════════════
+            if (stage === 'geometry') {
+                if (operation.type === 'drill') {
+                    await this.generateDrillStrategy(operation);
+                } else if (operation.type === 'cutout') {
+                    await this.generateCutoutOffset(operation);
+                } else {
+                    await this.generateOffsets(operation);
+                }
+
                 if (layoutConfig?.ui?.autoTransition) {
                     setTimeout(() => {
                         this.switchGeometryStage('strategy');
@@ -713,28 +896,25 @@
 
                 // Return focus to tree after action completes
                 this.returnFocusToTree();
+
             } else if (stage === 'strategy') {
                 // Strategy -> Machine
                 try {
-                    this.ui.statusManager?.showStatus('Generating toolpath preview...', 'info'); 
-                    const previewSuccess = await this.generatePreview(op);
+                    this.ui.showStatus('Generating toolpath preview...', 'info');
+                    const previewSuccess = await this.generatePreview(operation);
 
-                    if (!previewSuccess) {
-                        return;
-                    }
+                    if (!previewSuccess) return;
 
                     if (this.ui.navTreePanel) {
-                        const fileNode = Array.from(this.ui.navTreePanel.nodes.values())
-                            .find(n => n.operation?.id === op.id);
-                        if (fileNode) { 
-                            this.ui.navTreePanel.updateFileGeometries(fileNode.id, op); 
+                        const fileNode = this.ui.navTreePanel.getNodeByOperationId(operation.id);
+                        if (fileNode) {
+                            this.ui.navTreePanel.updateFileGeometries(fileNode.id, operation);
                         }
                     }
 
-                    await this.ui.updateRendererAsync(); 
-                    this.ui.statusManager?.showStatus('Preview generated', 'success');
+                    await this.ui.updateRendererAsync();
+                    this.ui.showStatus('Preview generated', 'success');
 
-                    const transitionDelay = layoutConfig?.ui?.transitionDelay || 300;
                     if (layoutConfig?.ui?.autoTransition) {
                         setTimeout(() => {
                             this.switchGeometryStage('machine');
@@ -745,21 +925,21 @@
                     this.returnFocusToTree();
 
                 } catch (error) {
-                    console.error('[OperationPanel] Preview generation failed:', error); 
-                    this.ui.statusManager?.showStatus('Preview failed: ' + error.message, 'error'); 
+                    console.error('[OperationPanel] Preview generation failed:', error);
+                    this.ui.showStatus('Preview failed: ' + error.message, 'error');
                 }
-            } else if (stage === 'machine') {
-                // Machine -> Modal
-                if (window.pcbcam?.modalManager) {
-                    const readyOps = this.ui.core.operations.filter(o => o.preview?.ready); 
-                    if (readyOps.length === 0) { 
-                        this.ui.statusManager?.showStatus('No operations ready. Generate previews first.', 'warning'); 
-                        return; 
-                    }
 
-                    window.pcbcam.modalManager.showToolpathModal(readyOps, op.id); 
+            } else if (stage === 'machine') {
+                const controller = window.pcbcam;
+                if (controller?.modalManager) {
+                    const readyOps = this.ui.core.operations.filter(o => this.ui.core.isExportReady(o));
+                    if (readyOps.length === 0) {
+                        this.ui.showStatus('No operations ready. Generate previews first.', 'warning');
+                        return;
+                    }
+                    controller.modalManager.showModal('exportManager', { operations: readyOps, highlightOperationId: operation.id });
                 } else {
-                    this.ui.statusManager?.showStatus('Operations manager not available', 'error'); 
+                    this.ui.showStatus('Export manager not available', 'error');
                 }
             }
         }
@@ -776,16 +956,20 @@
         }
 
         switchGeometryStage(newStage) {
-            const validStages = ['geometry', 'strategy', 'machine'];
-            if (!validStages.includes(newStage)) {
+            const pipelineType = window.pcbcam?.pipelineState?.type || 'cnc';
+            const validStages = this.parameterManager.getStagesForPipeline(pipelineType);
+            // Also accept CNC stages so hybrid doesn't break
+            const allValid = [...new Set([...validStages, 'geometry', 'strategy', 'machine', 'export_summary'])];
+
+            if (!allValid.includes(newStage)) {
                 console.warn(`[OperationPanel] Invalid geometry stage: ${newStage}`);
                 return;
             }
 
             this.currentGeometryStage = newStage;
 
-            // Simply rebuild the parameter panel for the new stage
             if (this.currentOperation) {
+                // All stages (including export_summary) route through showOperationProperties
                 this.showOperationProperties(this.currentOperation, newStage);
             }
         }
@@ -804,17 +988,16 @@
                 await this.core.generateOffsetGeometry(operation, params);
 
                 if (this.ui.navTreePanel) {
-                    const fileNode = Array.from(this.ui.navTreePanel.nodes.values())
-                        .find(n => n.operation?.id === operation.id);
+                    const fileNode = this.ui.navTreePanel.getNodeByOperationId(operation.id);
                     if (fileNode) {
                         this.ui.navTreePanel.updateFileGeometries(fileNode.id, operation);
                     }
                 }
                 await this.ui.updateRendererAsync();
-                this.ui.statusManager?.showStatus(`Generated ${operation.offsets.length} offset(s)`, 'success');
+                this.ui.showStatus(`Generated ${operation.offsets.length} offset(s)`, 'success');
             } catch (error) {
                 console.error('[OperationPanel] Offset generation failed:', error);
-                this.ui.statusManager?.showStatus('Failed: ' + error.message, 'error');
+                this.ui.showStatus('Failed: ' + error.message, 'error');
             } finally {
                 // Hide the spinner (this runs on success OR failure)
                 this.ui.hideCanvasSpinner();
@@ -823,22 +1006,21 @@
 
         async generateDrillStrategy(operation) {
             const params = this.parameterManager.getAllParameters(operation.id);
-            this.ui.statusManager?.showStatus(
+            this.ui.showStatus(
                 params.millHoles ? 'Generating milling paths...' : 'Generating peck positions...',
                 'info'
             );
             try {
                 await this.core.generateDrillStrategy(operation, params);
                 if (this.ui.navTreePanel) {
-                    const fileNode = Array.from(this.ui.navTreePanel.nodes.values())
-                        .find(n => n.operation?.id === operation.id);
+                    const fileNode = this.ui.navTreePanel.getNodeByOperationId(operation.id);
                     if (fileNode) {
                         this.ui.navTreePanel.updateFileGeometries(fileNode.id, operation);
                     }
                 }
                 await this.ui.updateRendererAsync();
                 if (operation.warnings?.length > 0) {
-                    this.ui.statusManager?.showStatus(
+                    this.ui.showStatus(
                         `Generated with ${operation.warnings.length} warning(s)`,
                         'warning'
                     );
@@ -846,47 +1028,204 @@
                 } else {
                     const count = operation.offsets[0]?.primitives.length || 0;
                     const mode = params.millHoles ? 'milling paths' : 'peck positions';
-                    this.ui.statusManager?.showStatus(`Generated ${count} ${mode}`, 'success');
+                    this.ui.showStatus(`Generated ${count} ${mode}`, 'success');
                 }
             } catch (error) {
                 console.error('[OperationPanel] Drill strategy generation failed:', error);
-                this.ui.statusManager?.showStatus('Failed: ' + error.message, 'error');
+                this.ui.showStatus('Failed: ' + error.message, 'error');
             }
         }
 
         async generateCutoutOffset(operation) {
             const params = this.parameterManager.getAllParameters(operation.id);
-            this.ui.statusManager?.showStatus('Generating cutout path...', 'info');
-            
+            this.ui.showStatus('Generating cutout path...', 'info');
+
             try {
                 // Pass the params object as the settings.
                 await this.core.generateOffsetGeometry(operation, params);
-                
+
                 if (this.ui.navTreePanel) {
-                    const fileNode = Array.from(this.ui.navTreePanel.nodes.values())
-                        .find(n => n.operation?.id === operation.id);
+                    const fileNode = this.ui.navTreePanel.getNodeByOperationId(operation.id);
                     if (fileNode) {
                         this.ui.navTreePanel.updateFileGeometries(fileNode.id, operation);
                     }
                 }
 
                 await this.ui.updateRendererAsync();
-                this.ui.statusManager?.showStatus('Cutout path generated', 'success');
+                this.ui.showStatus('Cutout path generated', 'success');
             } catch (error) {
                 console.error('[OperationPanel] Cutout offset failed:', error);
-                this.ui.statusManager?.showStatus('Failed: ' + error.message, 'error');
+                this.ui.showStatus('Failed: ' + error.message, 'error');
+            }
+        }
+
+        /**
+         * Translates laser parameters into offset engine inputs. The offset engine is geometry-agnostic — it works with toolDiameter/passes/stepOver regardless of whether the "tool" is a mill bit or a laser spot.
+         */
+        async generateLaserPaths(operation) {
+            const params = this.parameterManager.getAllParameters(operation.id);
+
+            const exportFormat = window.pcbcam.core.settings.laser.exportFormat;
+
+            const spotSize = params.laserSpotSize;
+            const stepOverPct = exportFormat === 'png' ? 0 : (params.laserStepOver);
+            const stepDistance = spotSize * (1 - stepOverPct / 100);
+            const strategy = exportFormat === 'png' ? 'filled' : (params.laserClearStrategy);
+
+            // Build settings object — shared fields
+            const laserSettings = {
+                toolDiameter: spotSize,
+                stepOver: stepOverPct,
+                stepDistance: stepDistance,
+                clearStrategy: strategy,
+                hatchAngle: params.laserHatchAngle,
+                hatchPasses: params.laserHatchPasses,
+                combineOffsets: true
+            };
+
+            // Per-operation-type configuration
+            if (operation.type === 'cutout' || operation.type === 'drill') {
+                // Cutout and drill: single-pass offset with cut-side control
+                laserSettings.passes = 1;
+                laserSettings.cutSide = params.laserCutSide || (operation.type === 'drill' ? 'inside' : 'outside');
+                laserSettings.clearStrategy = 'offset';
+
+            } else if (operation.type === 'clearing') {
+                // Clearing: fill the source geometry inward according to selected strategy.
+                // The operation's own primitives define the clearing zone.
+                laserSettings.clearStrategy = strategy;
+
+                switch (strategy) {
+                    case 'offset':
+                        // REVIEW - BECAUSE THERE'S NO SELF INTERSECTING SAFEGUARDS THIS ALMOST ALWAYS GENERATES CORRUPTED GEOMETRY - MAY NEED USER PASS INPUT UNTIL AUTOMATED
+                        // Auto-calculate passes to fill the entire geometry with concentric inward offsets.
+                        // Use half the largest dimension of the source geometry as the fill distance.
+                        if (operation.bounds && stepDistance > 0) {
+                            const maxDim = Math.max(
+                                operation.bounds.maxX - operation.bounds.minX,
+                                operation.bounds.maxY - operation.bounds.minY
+                            );
+                            laserSettings.passes = Math.ceil((maxDim / 2) / stepDistance);
+                        } else {
+                            laserSettings.passes = 1;
+                        }
+                        break;
+                    case 'filled':
+                    case 'hatch':
+                    default:
+                        laserSettings.passes = 1;
+                        break;
+                }
+
+            } else {
+                // Isolation: standard halo approach
+                const isolationWidth = params.laserIsolationWidth;
+
+                laserSettings.clearStrategy = strategy;
+                laserSettings.isolationWidth = isolationWidth;
+
+                switch (strategy) {
+                    case 'offset':
+                        laserSettings.passes = stepDistance > 0 ? Math.ceil(isolationWidth / stepDistance) : 1;
+                        break;
+                    case 'filled':
+                    case 'hatch':
+                    default:
+                        laserSettings.passes = 1;
+                        break;
+                }
+            }
+
+            // Invalidate cached clearance polygon so stale geometry isn't reused
+            operation.clearancePolygon = null;
+
+            this.ui.showCanvasSpinner('Generating laser paths...');
+            await new Promise(resolve => setTimeout(resolve, 10));
+
+            try {
+                await this.core.generateLaserGeometry(operation, laserSettings);
+
+                if (this.ui.navTreePanel) {
+                    const fileNode = this.ui.navTreePanel.getNodeByOperationId(operation.id);
+                    if (fileNode) {
+                        this.ui.navTreePanel.updateFileGeometries(fileNode.id, operation);
+                    }
+                }
+
+                await this.ui.updateRendererAsync();
+
+                const totalPrimitives = operation.offsets?.reduce(
+                    (sum, o) => sum + (o.primitives?.length || 0), 0
+                ) || 0;
+                this.ui.showStatus(
+                    `Generated ${totalPrimitives} laser path(s) [${strategy}]`, 'success'
+                );
+            } catch (error) {
+                console.error('[OperationPanel] Laser path generation failed:', error);
+                this.ui.showStatus('Failed: ' + error.message, 'error');
+            } finally {
+                this.ui.hideCanvasSpinner();
+            }
+        }
+
+        /**
+         * Renders the laser export summary panel. This is a display-only stage with no editable parameters.
+         */
+        renderExportSummary(operation) {
+            const container = document.getElementById('property-form');
+            const title = document.getElementById('inspector-title');
+
+            if (!container || !title) return;
+
+            title.textContent = operation.file.name;
+            container.innerHTML = '';
+
+            // Summary section
+            const section = document.createElement('div');
+            section.className = 'property-section';
+
+            const h3 = document.createElement('h3');
+            h3.textContent = 'Laser Export Summary';
+            section.appendChild(h3);
+
+            const summary = document.createElement('div');
+            summary.className = 'export-summary-info';
+
+            const strategy = operation.settings?.laserClearStrategy || 'offset';
+            const offsetCount = operation.offsets?.length || 0;
+            const primCount = operation.offsets?.reduce((sum, o) => sum + (o.primitives?.length || 0), 0) || 0;
+            const previewReady = this.core.isExportReady(operation) ? 'Yes' : 'No';
+
+            summary.innerHTML = `
+                <div><strong>Operation:</strong> ${operation.type}</div>
+                <div><strong>Strategy:</strong> ${strategy}</div>
+                <div><strong>Passes:</strong> ${offsetCount}</div>
+                <div><strong>Path count:</strong> ${primCount}</div>
+            `;
+            section.appendChild(summary);
+            container.appendChild(section);
+
+            // Action button
+            const actionText = this.getActionButtonText('export_summary', operation.type);
+            if (actionText) {
+                container.appendChild(this.createActionButton(actionText));
+
+                const actionBtn = container.querySelector('#action-button');
+                if (actionBtn) {
+                    actionBtn.addEventListener('click', () => this.handleAction());
+                }
             }
         }
 
         async generatePreview(operation) {
             if (!operation.offsets || operation.offsets.length === 0) {
-                this.ui.statusManager?.showStatus('Generate offsets/strategy first', 'warning');
+                this.ui.showStatus('Generate offsets/strategy first', 'warning');
                 return;
             }
             const firstOffset = operation.offsets[0];
             const toolDiameter = firstOffset.metadata?.toolDiameter;
             if (typeof toolDiameter === 'undefined' || toolDiameter <= 0) {
-                this.ui.statusManager?.showStatus('Error: Tool diameter not found.', 'error');
+                this.ui.showStatus('Error: Tool diameter not found.', 'error');
                 return false;
             }
             const allPrimitives = [];
@@ -911,14 +1250,13 @@
             const previewToggle = document.getElementById('show-previews');
             if (previewToggle) previewToggle.checked = true;
             if (this.ui.navTreePanel) {
-                const fileNode = Array.from(this.ui.navTreePanel.nodes.values())
-                    .find(n => n.operation?.id === operation.id);
+                const fileNode = this.ui.navTreePanel.getNodeByOperationId(operation.id);
                 if (fileNode) {
                     this.ui.navTreePanel.updateFileGeometries(fileNode.id, operation);
                 }
             }
             await this.ui.updateRendererAsync();
-            this.ui.statusManager?.showStatus('Preview generated', 'success');
+            this.ui.showStatus('Preview generated', 'success');
             return true;
         }
 

@@ -1,5 +1,5 @@
 /*!
- * @file        gcode/processors/base-processor.js
+ * @file        export/processors/base-processor.js
  * @description Base post-processing orchestrator
  * @author      Eltryus - Ricardo Marques
  * @copyright   2025-2026 Eltryus - Ricardo Marques

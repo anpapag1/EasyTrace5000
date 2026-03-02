@@ -123,6 +123,35 @@ window.PCBCAMConfig = {
     },
 
     // ============================================================================
+    // Laser pipeline configuration
+    // ============================================================================
+    laserProfiles: {
+        uv: {
+            label: 'UV Laser',
+            description: 'Direct copper ablation, stencil cutting, drilling, board cutout',
+            laserClass: 'cold'
+        },
+        fiber: {
+            label: 'Fiber Laser',
+            description: 'Copper ablation, stencil cutting, selective reflow soldering',
+            laserClass: 'hot'
+        }
+    },
+
+    laserDefaults: {
+        // Default layer colors for SVG export — matches common LightBurn conventions
+        layerColors: {
+            isolation: '#ff0000', // Red
+            drill:     '#0000ff', // Blue
+            clearing:  '#00ff00', // Green
+            cutout:    '#000000'  // Black
+        },
+        outputFormat: 'svg', // 'svg' | 'png'
+        rasterDPI: 1000, // Some DPI parameters may be needed when exporting svg's as some softwares can assume wrong values if not present.
+        exportPadding: 5.0 // mm — physical margin around board bounds in exported file
+    },
+
+    // ============================================================================
     // STORAGE KEYS
     // ============================================================================
     storageKeys: {
@@ -649,6 +678,47 @@ window.PCBCAMConfig = {
         }
     },
 
+    // ═══════════════════════════════════════════════════════════════
+    // Laser Pipeline Configuration
+    // ═══════════════════════════════════════════════════════════════
+    laser: {
+        defaults: {
+            spotSize: 0.02, // mm — physical laser kerf
+            exportFormat: 'svg', // 'svg' | 'png'
+            exportDPI: 1000, // Only used for PNG
+            defaultClearStrategy: 'offset'  // 'filled' | 'offset' | 'hatch'
+        },
+
+        // Strategy definitions — used by UI and geometry modules
+        strategies: {
+            filled:         { label: 'Filled Polygon',  requiresPaths: false, svgOnly: true },
+            offset:         { label: 'Offset Paths',    requiresPaths: true,  svgOnly: false },
+            hatch:          { label: 'Hatch',  requiresPaths: true,  svgOnly: false, hasAngle: true },
+        },
+
+        // Per-operation defaults (merged into operations config)
+        operationDefaults: {
+            isolation: {
+                isolationWidth: 0.3, // mm — total copper removal width
+                stepOver: 10, // %
+                clearStrategy: 'offset',
+                hatchAngle: 0
+            },
+            clearing: {
+                clearingPadding: 1.0, // mm — padding beyond board/copper bounds - UNUSED?
+                stepOver: 10, // %
+                clearStrategy: 'offset',
+                hatchAngle: 0
+            },
+            cutout: {
+                cutSide: 'outside'
+            },
+            drill: {
+                cutSide: 'inside'
+            }
+        }
+    },
+
     // ============================================================================
     // G-CODE GENERATION
     // [MOVE TO: constants.js] - G-code templates (static)
@@ -842,7 +912,12 @@ window.PCBCAMConfig = {
             tabWidth: { min: 0.5, max: 10, step: 0.1 },
             tabHeight: { min: 0.1, max: 5, step: 0.1 },
             travelZ: { min: 0, max: 50, step: 0.1 },
-            safeZ: { min: 0, max: 50, step: 0.1 }
+            safeZ: { min: 0, max: 50, step: 0.1 },
+            laserSpotSize: { min: 0.01,  max: 1.0, step: 0.01 },
+            laserIsolationWidth: { min: 0.05, max: 2.5, step: 0.01 },
+            laserStepOver: { min: 10, max: 95, step: 5 },
+            laserHatchAngle: { min: 0, max: 180, step: 5 },
+            laserExportPadding: { min: 0, max: 10, step: 0.5 }
         },
         
         text: {
@@ -885,7 +960,6 @@ window.PCBCAMConfig = {
             tooltipTrigger: '?'
         },
 
-        // [ADDED] For ui-operation-panel
         operationPanel: {                        // [USED IN: ui-operation-panel.js] [MOVE TO: constants.js]
             categories: {
                 tool: 'Tool Selection',
@@ -896,28 +970,16 @@ window.PCBCAMConfig = {
                 drill: 'Drilling Parameters',
                 cutout: 'Cutout Settings',
                 machine: 'Machine Configuration',
-                general: 'General Settings'
+                general: 'General Settings',
+                laser_tool: 'Laser Tool',
+                laser_geometry: 'Isolation',
+                laser_strategy: 'Clearing Strategy',
+                laser_cutout: 'Cut Settings',
+                laser_export: 'Export Settings'
             },
             textAreaStyle: {
                 fontFamily: 'monospace',
                 fontSize: '11px'
-            },
-            warningPanelCSS: {
-                background: '#fff3cd',
-                border: '1px solid #ffc107',
-                borderRadius: '4px',
-                padding: '12px',
-                marginBottom: '16px',
-                color: '#856404'
-            },
-            warningHeaderCSS: {
-                fontWeight: 'bold',
-                marginBottom: '8px'
-            },
-            warningListCSS: {
-                margin: '0',
-                paddingLeft: '20px',
-                fontSize: '13px'
             }
         },
 
@@ -955,6 +1017,20 @@ window.PCBCAMConfig = {
                 { value: 'G54', label: 'G54' },
                 { value: 'G55', label: 'G55' },
                 { value: 'G56', label: 'G56' }
+            ],
+            laserClearStrategy: [
+                { value: 'filled', label: 'Filled Polygon — Laser software controls fill' },
+                { value: 'offset', label: 'Offset Paths — Concentric, streak-proof' },
+                { value: 'hatch', label: 'Parallel Scan — Directional coverage' },
+            ],
+            laserCutSide: [
+                { value: 'outside', label: 'Outside (Kerf outward)' },
+                { value: 'inside', label: 'Inside (Kerf inward)' },
+                { value: 'on', label: 'On Line (No compensation)' }
+            ],
+            laserExportFormat: [
+                { value: 'svg', label: 'SVG — Vector for LightBurn, RDWorks, LaserGRBL' },
+                { value: 'png', label: 'PNG — Raster image import' }
             ]
         },
     },

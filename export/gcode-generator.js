@@ -1,5 +1,5 @@
 /*!
- * @file        gcode/gcode-generator.js
+ * @file        export/gcode-generator.js
  * @description Complete G-code generation from toolpath plans
  * @author      Eltryus - Ricardo Marques
  * @copyright   2025-2026 Eltryus - Ricardo Marques

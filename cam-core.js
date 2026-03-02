@@ -195,6 +195,12 @@
                         (gcodeConfig.templates?.[gcodeConfig.postProcessor]?.end),
                     units: gcodeConfig.units
                 },
+                laser: {
+                    spotSize: config.laser.defaults.spotSize,
+                    exportFormat: config.laser.defaults.exportFormat,
+                    exportDPI: config.laser.defaults.exportDPI,
+                    defaultClearStrategy: config.laser.defaults.defaultClearStrategy
+                },
                 ui: {
                     theme: config.ui?.theme,
                     showTooltips: config.ui?.showTooltips !== false
@@ -609,6 +615,16 @@
             return this.operations.some(op => op.primitives && op.primitives.length > 0);
         }
 
+        /**
+         * Universal export-readiness check for any pipeline.
+         * CNC: requires preview.ready (generated via the preview stage).
+         * Laser: requires exportReady (set after laser path generation).
+         */
+        isExportReady(op) {
+            if (!op) return false;
+            return !!(op.exportReady || op.preview?.ready);
+        }
+
         calculateSignedArea(points) {
             if (!points || points.length < 3) return 0;
 
@@ -619,6 +635,261 @@
                 area -= points[j].x * points[i].y;
             }
             return area / 2;
+        }
+
+        /**
+         * Generates the clearance polygon: the area between the offset boundary (at isolationWidth from copper) and the original copper shapes.
+         * Both sides are kept as raw Clipper polygon output (no arc reconstruction) through the final boolean difference. This prevents tessellation mismatches where independently-reconstructed-then-re-tessellated circles produce wedge artifacts in the difference result.
+         * The caller (generateLaserGeometry) reconstructs arcs on the result only when needed (e.g. filled SVG export, not hatching).
+         */
+        async _generateClearancePolygon(operation, isolationWidth) {
+            await this.ensureProcessorReady();
+
+            if (!operation.primitives || operation.primitives.length === 0) return [];
+
+            this.debug(`=== CLEARANCE POLYGON GENERATION: width=${isolationWidth.toFixed(3)}mm ===`);
+
+            // ── Expanded boundary ──
+            // Use the proven offset pipeline but skip its internal arc reconstruction.
+            // The raw polygon output aligns with Clipper's coordinate grid, which is critical for a clean boolean difference in step 3.
+            const savedOffsets = operation.offsets;
+
+            await this.generateOffsetGeometry(operation, {
+                toolDiameter: isolationWidth * 2,
+                passes: 1,
+                stepOver: 0,
+                combineOffsets: true,
+                skipArcReconstruction: true
+            });
+
+            const expanded = operation.offsets.flatMap(o => o.primitives);
+            operation.offsets = savedOffsets;
+
+            if (expanded.length === 0) {
+                this.debug('Offset expansion produced no geometry');
+                return [];
+            }
+
+            // ── Copper footprint ──
+            // Fusion without arc reconstruction keeps the output as raw Clipper polygons, matching the expanded side's coordinate precision.
+            this.geometryProcessor.clearProcessorCache();
+
+            const footprint = await this.geometryProcessor.fuseGeometry(
+                operation.primitives,
+                { enableArcReconstruction: false }
+            );
+
+            if (footprint.length === 0) {
+                this.debug('Fusion produced no copper footprint');
+                return [];
+            }
+
+            this.debug(`Expanded boundary: ${expanded.length} primitive(s)`);
+            this.debug(`Copper footprint: ${footprint.length} primitive(s)`);
+
+            // ── Boolean difference ──
+            // Both sides are PathPrimitives with dense polygon contours straight from Clipper. No standardization needed — no analytic primitives exist because reconstruction was skipped on both sides.
+            const clearanceZone = await this.geometryProcessor.difference(expanded, footprint);
+
+            this.debug(`Clearance polygon: ${clearanceZone.length} polygon(s)`);
+            this.debug(`=== CLEARANCE POLYGON COMPLETE ===`);
+
+            operation.clearancePolygon = clearanceZone;
+            return clearanceZone;
+        }
+
+        /**
+         * UNUSED FOR NOW
+         * Generates the full-board clearance polygon for copper clearing operations.
+         * This is fundamentally different from isolation clearance:
+         * - Isolation: expandedCopper − originalCopper = halo around traces
+         * - Clearing: boardBounds − copperFootprint = all unused copper area
+         *
+         * @param {Object} operation - The operation with parsed primitives.
+         * @param {number} padding - Extra padding beyond board bounds in mm.
+         * @returns {Array<PathPrimitive>} Raw polygon clearance zone.
+         */
+        async _generateBoardClearance(operation, padding = 1.0) {
+            await this.ensureProcessorReady();
+
+            if (!operation.primitives || operation.primitives.length === 0) return [];
+
+            this.debug(`=== BOARD CLEARANCE GENERATION: padding=${padding.toFixed(3)}mm ===`);
+
+            // ── Board boundary rectangle ──
+            // Use coordinateSystem bounds if available, otherwise compute from all operations
+            let bounds = this.coordinateSystem?.boardBounds;
+            if (!bounds) {
+                // Fallback: compute bounds from all loaded operations
+                let minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity;
+                for (const op of this.operations) {
+                    if (op.bounds) {
+                        minX = Math.min(minX, op.bounds.minX);
+                        minY = Math.min(minY, op.bounds.minY);
+                        maxX = Math.max(maxX, op.bounds.maxX);
+                        maxY = Math.max(maxY, op.bounds.maxY);
+                    }
+                }
+                if (!isFinite(minX)) {
+                    this.debug('No valid bounds found for board clearance');
+                    return [];
+                }
+                bounds = { minX, minY, maxX, maxY };
+            }
+
+            // Create a rectangle primitive representing the board + padding
+            const boardRect = new PathPrimitive([{
+                points: [
+                    { x: bounds.minX - padding, y: bounds.minY - padding },
+                    { x: bounds.maxX + padding, y: bounds.minY - padding },
+                    { x: bounds.maxX + padding, y: bounds.maxY + padding },
+                    { x: bounds.minX - padding, y: bounds.maxY + padding },
+                    { x: bounds.minX - padding, y: bounds.minY - padding }
+                ],
+                isHole: false,
+                nestingLevel: 0,
+                parentId: null,
+                arcSegments: [],
+                curveIds: []
+            }], {
+                polarity: 'dark',
+                operationType: 'clearing',
+                operationId: operation.id
+            });
+
+            // ── Copper footprint from ALL copper operations ──
+            // Clearing removes copper that ISN'T traces/pads/regions.
+            // Gather primitives from isolation + clearing operations.
+            const copperPrimitives = [];
+            for (const op of this.operations) {
+                if ((op.type === 'isolation' || op.type === 'clearing') &&
+                    op.primitives && op.primitives.length > 0) {
+                    copperPrimitives.push(...op.primitives);
+                }
+            }
+
+            if (copperPrimitives.length === 0) {
+                this.debug('No copper primitives found — returning full board as clearance');
+                return [boardRect];
+            }
+
+            // Fuse copper without arc reconstruction (raw polygons for clean boolean)
+            this.geometryProcessor.clearProcessorCache();
+            const copperFootprint = await this.geometryProcessor.fuseGeometry(
+                copperPrimitives,
+                { enableArcReconstruction: false }
+            );
+
+            if (copperFootprint.length === 0) {
+                this.debug('Fusion produced no copper footprint — returning full board');
+                return [boardRect];
+            }
+
+            this.debug(`Board boundary: ${(bounds.maxX - bounds.minX).toFixed(1)} × ${(bounds.maxY - bounds.minY).toFixed(1)}mm + ${padding}mm padding`);
+            this.debug(`Copper footprint: ${copperFootprint.length} polygon(s)`);
+
+            // ── Boolean difference: board − copper ──
+            const clearanceZone = await this.geometryProcessor.difference([boardRect], copperFootprint);
+
+            this.debug(`Board clearance: ${clearanceZone.length} polygon(s)`);
+            this.debug(`=== BOARD CLEARANCE COMPLETE ===`);
+
+            return clearanceZone;
+        }
+
+        async generateLaserGeometry(operation, settings) {
+            this.debug(`=== LASER GEOMETRY GENERATION: ${settings.clearStrategy} ===`);
+
+            const strategy = settings.clearStrategy || 'offset';
+
+            // ─── OFFSET STRATEGY ───────────────────────────────────────────
+            // Concentric passes around copper — same geometry as CNC isolation.
+            // The offset contours ARE the final laser paths.
+            // Also used by drill and cutout (single-pass with cut-side control).
+            if (strategy === 'offset') {
+                await this.generateOffsetGeometry(operation, settings);
+                this.isToolpathCacheValid = false;
+                return operation.offsets;
+            }
+
+            // ─── FILLED / HATCH STRATEGIES ─────────────────────────────────
+            // These need a clearance polygon to fill or hatch inside.
+            // The source of that polygon differs by operation type:
+            //   - Isolation: expanded copper − original copper (halo)
+            //   - Clearing:  board bounds − copper footprint (full board clear)
+
+            let clearanceZone = operation.clearancePolygon;
+
+            if (!clearanceZone || clearanceZone.length === 0) {
+                if (operation.type === 'clearing') {
+                    // Clearing: the source geometry IS the area to fill.
+                    // Fuse primitives into clean polygons for hatching/filling.
+                    this.geometryProcessor.clearProcessorCache();
+                    clearanceZone = await this.geometryProcessor.fuseGeometry(
+                        operation.primitives,
+                        { enableArcReconstruction: false }
+                    );
+                    this.debug(`Clearing zone from source geometry: ${clearanceZone.length} polygon(s)`);
+                } else {
+                    // Isolation: halo around traces, pads and regions
+                    const isolationWidth = settings.isolationWidth
+                        || (settings.toolDiameter * settings.passes * (1 - (settings.stepOver || 50) / 100))
+                        || 0.3;
+                    this.debug(`Laser isolation width: ${isolationWidth.toFixed(3)}mm`);
+                    clearanceZone = await this._generateClearancePolygon(operation, isolationWidth);
+                }
+            }
+
+            if (!clearanceZone || clearanceZone.length === 0) {
+                this.debug('Clearance zone generation returned empty, falling back to offset');
+                await this.generateOffsetGeometry(operation, settings);
+                return operation.offsets;
+            }
+
+            switch (strategy) {
+                case 'filled': {
+                    // Filled export benefits from arc reconstruction for cleaner SVG curves.
+                    let filledGeometry = clearanceZone;
+                    if (this.geometryProcessor?.arcReconstructor) {
+                        filledGeometry = this.geometryProcessor.arcReconstructor
+                            .processForReconstruction(clearanceZone);
+                        this.debug(`Filled: reconstructed ${clearanceZone.length} → ${filledGeometry.length} primitives`);
+                    }
+
+                    operation.offsets = [{
+                        distance: 0,
+                        pass: 1,
+                        type: 'filled',
+                        primitives: filledGeometry,
+                        metadata: {
+                            strategy: 'filled',
+                            isolationWidth: settings.isolationWidth || 0,
+                            isBoardClearing: settings.isBoardClearing || false,
+                            finalCount: filledGeometry.length
+                        }
+                    }];
+                    break;
+                }
+
+                case 'hatch': {
+                    if (typeof HatchGenerator !== 'undefined') {
+                        operation.offsets = HatchGenerator.generate(clearanceZone, settings);
+                        this.debug(`Hatch: generated ${operation.offsets.length} pass(es)`);
+                    } else {
+                        console.warn('[Core] HatchGenerator is missing. Falling back to offset.');
+                        await this.generateOffsetGeometry(operation, settings);
+                    }
+                    break;
+                }
+
+                default:
+                    this.debug(`Unknown laser strategy: ${strategy}, falling back to offset`);
+                    await this.generateOffsetGeometry(operation, settings);
+                    break;
+            }
+
+            this.isToolpathCacheValid = false;
+            return operation.offsets;
         }
 
         async generateOffsetGeometry(operation, settings) {
@@ -637,8 +908,8 @@
             let isInternal = operation.type === 'clearing';
             let isOnLine = false;
 
-            if (operation.type === 'cutout') {
-                // Respect the UI dropdown for Cutouts
+            if (operation.type === 'cutout' || operation.type === 'drill') {
+                // Respect the UI dropdown for Cutouts and Drills
                 if (settings.cutSide === 'inside') {
                     isInternal = true;
                 } else if (settings.cutSide === 'on') {
@@ -648,6 +919,32 @@
             }
 
             let offsetDistances;
+
+            // Calculate Distances
+            if (isOnLine) {
+                offsetDistances = [0];
+            } else {
+                offsetDistances = this._calculateOffsetDistances(
+                    settings.toolDiameter,
+                    settings.passes,
+                    settings.stepOver,
+                    isInternal
+                );
+            }
+
+            // Guard: If all offset distances would collapse geometry (e.g. hole smaller than spot), fall back to on-line (zero offset) so the user still gets output.
+            if (operation.type === 'drill' && isInternal && offsetDistances.length > 0) {
+                const drillCircles = operation.primitives
+                    .filter(p => p.type === 'circle' && p.radius);
+                if (drillCircles.length > 0) {
+                    const smallestFeature = Math.min(...drillCircles.map(p => p.radius * 2));
+                    const largestOffset = Math.max(...offsetDistances.map(d => Math.abs(d)));
+                    if (smallestFeature > 0 && largestOffset >= smallestFeature / 2) {
+                        this.debug(`Drill offset ${largestOffset.toFixed(3)}mm would collapse features (smallest: ${smallestFeature.toFixed(3)}mm). Falling back to on-line.`);
+                        offsetDistances = [0];
+                    }
+                }
+            }
 
             // Calculate Distances
             if (isOnLine) {
@@ -712,8 +1009,10 @@
                 const offsetOuters = [];
                 for (const primitive of outerContours) {
                     const role = primitive.properties?.role;
+                    const isLaserPipeline = settings.clearStrategy !== undefined; // Or explicitly pass an isLaser flag
 
-                    if (role === 'drill_hole' || role ==='drill_slot') {
+                    // Skip CNC drill roles ONLY if inside the CNC pipeline
+                    if (!isLaserPipeline && (role === 'drill_hole' || role === 'drill_slot')) {
                         continue;
                     }
 
@@ -757,9 +1056,14 @@
                     }
                 }
 
-                // Always run arc reconstruction if there are curves
-                this.debug(`Running arc reconstruction...`);
-                finalPassGeometry = this.geometryProcessor.arcReconstructor.processForReconstruction(finalPassGeometry);
+                // Arc reconstruction: collapse polygon sequences back into analytic arcs.
+                // Skipped when the caller will do its own boolean + reconstruction later (e.g. _generateClearancePolygon) to avoid tessellation mismatches.
+                if (!settings.skipArcReconstruction) {
+                    this.debug(`Running arc reconstruction...`);
+                    finalPassGeometry = this.geometryProcessor.arcReconstructor.processForReconstruction(finalPassGeometry);
+                } else {
+                    this.debug(`Arc reconstruction skipped (caller will handle)`);
+                }
 
                 this.debug(`Pass complete: ${finalPassGeometry.length} primitive(s).`);
 
@@ -1300,7 +1604,34 @@
                     optimization: config.gcode?.optimization,
                     precision: precision,
                     offsettingEpsilon: offsettingEpsilon
-                }
+                },
+
+                // Laser-specific (only populated in laser/hybrid pipeline)
+                laser: (() => {
+                    const controller = window.pcbcam;
+                    if (!controller || (controller.pipelineState.type !== 'laser' && controller.pipelineState.type !== 'hybrid')) {
+                        return null;
+                    }
+
+                    const laserMachine = this.settings.laser;
+                    const spotSize = laserMachine.spotSize;
+                    const stepOverPct = params.laserStepOver;
+                    const isolationWidth = params.laserIsolationWidth;
+                    const stepDistance = spotSize * (1 - stepOverPct / 100);
+
+                    return {
+                        spotSize: spotSize,
+                        exportFormat: laserMachine.exportFormat,
+                        exportDPI: laserMachine.exportDPI,
+                        isolationWidth: isolationWidth,
+                        stepOver: stepOverPct,
+                        clearStrategy: params.laserClearStrategy,
+                        hatchAngle: params.laserHatchAngle,
+                        cutSide: params.laserCutSide,
+                        computedPasses: stepDistance > 0 ? Math.ceil(isolationWidth / stepDistance) : 1,
+                        stepDistance: stepDistance
+                    };
+                })()
             };
 
             return context;

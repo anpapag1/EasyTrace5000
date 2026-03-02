@@ -233,6 +233,10 @@
             attachTo('roland-max-feed', 'tooltips.machineSettings.rolandMaxFeed');
             attachTo('roland-spindle-mode', 'tooltips.machineSettings.rolandSpindleMode');
 
+            // Laser Machine Settings
+            attachTo('laser-spot-size', 'tooltips.machineSettings.laserSpotSize');
+            attachTo('laser-export-format', 'tooltips.machineSettings.laserExportFormat');
+
             // Visualization Panel Toggles
             attachTo('show-grid', 'tooltips.vizPanel.grid');
             attachTo('show-wireframe', 'tooltips.vizPanel.wireframe');
@@ -301,7 +305,7 @@
                     const dependencyEl = document.getElementById(dependencyId);
                     if (dependencyEl && !dependencyEl.checked) {
                         el.checked = false; // Un-check it
-                        this.ui.statusManager?.showStatus(`Enable '${dependencyEl.labels[0].textContent}' first`, 'warning');
+                        this.ui.showStatus(`Enable '${dependencyEl.labels[0].textContent}' first`, 'warning');
                         return;
                     }
                 }
@@ -375,6 +379,41 @@
             });
 
             this.debug("Visualization toggles setup complete.");
+        }
+
+        /**
+         * Invalidates generated laser operation if global machine settings change in a way that makes existing geometry incompatible.
+         */
+        invalidateLaserOperations(reasonMessage, affectedTypes = null) {
+            if (!this.ui || !this.ui.core) return;
+            let invalidated = false;
+
+            this.ui.core.operations.forEach(op => {
+                if (!window.pcbcam?.isLaserExportForOperation(op.type)) return;
+                if (!this.ui.core.isExportReady(op)) return;
+                if (affectedTypes && !affectedTypes.includes(op.type)) return; {
+                    op.exportReady = false;
+                    if (op.preview) op.preview.ready = false;
+                    
+                    // Explicit invalidation state
+                    op.isInvalidated = true;
+                    op.invalidatedReason = reasonMessage;
+                    
+                    invalidated = true;
+
+                    // Force tree node to update and show invalidation styling
+                    if (this.ui.navTreePanel) {
+                        const fileNode = this.ui.navTreePanel.getNodeByOperationId(op.id);
+                        if (fileNode) {
+                            this.ui.navTreePanel.updateFileGeometries(fileNode.id, op);
+                        }
+                    }
+                }
+            });
+
+            if (invalidated && reasonMessage) {
+                this.ui.showStatus('Existing geometry invalidated. Please review operations.', 'warning');
+            }
         }
 
         setupOffsetControls() {
@@ -502,7 +541,7 @@
                     if (result.success) {
                         this.ui.updateOriginDisplay();
                         const state = result.mirrorX ? 'enabled' : 'disabled';
-                        this.ui.statusManager?.showStatus(`Horizontal mirror ${state}`, 'info');
+                        this.ui.showStatus(`Horizontal mirror ${state}`, 'info');
                     }
                 });
             }
@@ -516,7 +555,7 @@
                     if (result.success) {
                         this.ui.updateOriginDisplay();
                         const state = result.mirrorY ? 'enabled' : 'disabled';
-                        this.ui.statusManager?.showStatus(`Vertical mirror ${state}`, 'info');
+                        this.ui.showStatus(`Vertical mirror ${state}`, 'info');
                     }
                 });
             }
@@ -620,9 +659,9 @@
             if (result.success) {
                 this.updateOffsetInputsWithTracking();
                 this.ui.updateOriginDisplay();
-                this.ui.statusManager.showStatus('Preview: Origin at board center (not saved)', 'info');
+                this.ui.showStatus('Preview: Origin at board center (not saved)', 'info');
             } else {
-                this.ui.statusManager.showStatus('Cannot preview center: ' + result.error, 'error');
+                this.ui.showStatus('Cannot preview center: ' + result.error, 'error');
             }
         }
 
@@ -633,9 +672,9 @@
             if (result.success) {
                 this.updateOffsetInputsWithTracking();
                 this.ui.updateOriginDisplay();
-                this.ui.statusManager.showStatus('Preview: Origin at board bottom-left (not saved)', 'info');
+                this.ui.showStatus('Preview: Origin at board bottom-left (not saved)', 'info');
             } else {
-                this.ui.statusManager.showStatus('Cannot preview bottom-left: ' + result.error, 'error');
+                this.ui.showStatus('Cannot preview bottom-left: ' + result.error, 'error');
             }
         }
 
@@ -646,9 +685,9 @@
             if (result.success) {
                 // The change listener will fire and call updateOffsetInputsWithTracking which now correctly updates the inputs AND the trackers.
                 this.ui.updateOriginDisplay();
-                this.ui.statusManager.showStatus('Origin saved at current position', 'success');
+                this.ui.showStatus('Origin saved at current position', 'success');
             } else {
-                this.ui.statusManager.showStatus('Cannot save origin: ' + result.error, 'error');
+                this.ui.showStatus('Cannot save origin: ' + result.error, 'error');
             }
         }
 
@@ -659,9 +698,9 @@
             if (result.success) {
                 this.updateOffsetInputsWithTracking();
                 this.ui.updateOriginDisplay();
-                this.ui.statusManager.showStatus('Reset to saved origin', 'success');
+                this.ui.showStatus('Reset to saved origin', 'success');
             } else {
-                this.ui.statusManager.showStatus('Cannot reset: ' + result.error, 'error');
+                this.ui.showStatus('Cannot reset: ' + result.error, 'error');
             }
         }
 
@@ -671,9 +710,9 @@
             const result = this.coordinateSystem.rotateBoardBy(angle);
             if (result.success) {
                 this.ui.updateOriginDisplay();
-                this.ui.statusManager.showStatus(`Board rotated by ${angle}°`, 'success');
+                this.ui.showStatus(`Board rotated by ${angle}°`, 'success');
             } else {
-                this.ui.statusManager.showStatus(`Cannot rotate board: ${result.error}`, 'error');
+                this.ui.showStatus(`Cannot rotate board: ${result.error}`, 'error');
             }
         }
 
@@ -683,9 +722,9 @@
             const result = this.coordinateSystem.resetRotationOnly();
             if (result.success) {
                 this.ui.updateOriginDisplay();
-                this.ui.statusManager.showStatus('Board rotation reset (position unchanged)', 'success');
+                this.ui.showStatus('Board rotation reset (position unchanged)', 'success');
             } else {
-                this.ui.statusManager.showStatus(`Cannot reset rotation: ${result.error}`, 'error');
+                this.ui.showStatus(`Cannot reset rotation: ${result.error}`, 'error');
             }
         }
 
@@ -859,15 +898,6 @@
                     this.ui.core.updateSettings('gcode', { postProcessor: newProcessor });
                     this.updateProcessorFieldVisibility(newProcessor);
 
-                    // Update the suggested output filename extension in the export modal
-                    const filenameInput = document.getElementById('gcode-filename');
-                    if (filenameInput) {
-                        const currentName = filenameInput.value || 'pcb-output.nc';
-                        const baseName = currentName.replace(/\.[^.]+$/, '');
-                        const ext = isRoland ? '.rml' : '.nc';
-                        filenameInput.value = baseName + ext;
-                    }
-
                     // Clear any cached G-code preview when switching processor type
                     const previewText = document.getElementById('gcode-preview-text');
                     if (previewText && previewText.value) {
@@ -894,7 +924,7 @@
                     }
 
                     if (isRoland !== wasRoland) {
-                        this.ui.statusManager?.showStatus(
+                        this.ui.showStatus(
                             `Switched to ${newProcessor}. Recalculate toolpaths to apply changes.`,
                             'warning'
                         );
@@ -1029,7 +1059,7 @@
                         );
                     }
 
-                    this.ui.statusManager?.showStatus(
+                    this.ui.showStatus(
                         `Roland profile: ${profile.label} (${profile.stepsPerMM} steps/mm, Z: ${profile.zMode})`, 'info'
                     );
                 });
@@ -1063,6 +1093,60 @@
                     this.ui.core.updateSettings('machine', { rolandSpindleMode: mode });
                     this.updateRolandSpindleVisibility(mode);
                 });
+            }
+
+            // --- Laser-specific fields ---
+            const laserSpotSizeInput = document.getElementById('laser-spot-size');
+            const laserExportFormatSelect = document.getElementById('laser-export-format');
+            const laserExportDpiInput = document.getElementById('laser-export-dpi');
+            const laserExportPaddingInput = document.getElementById('laser-export-padding');
+
+            // Initialize laser settings from loaded state
+            const laserSettings = loadedSettings.laser || {};
+
+            if (laserSpotSizeInput) {
+                laserSpotSizeInput.value = laserSettings.spotSize;
+                laserSpotSizeInput.addEventListener('change', (e) => {
+                    this.ui.core.updateSettings('laser', { spotSize: parseFloat(e.target.value)});
+
+                    // Invalidate geometry on spot size change
+                    this.invalidateLaserOperations('Laser spot size changed. Please regenerate laser paths.');
+                });
+            }
+
+            if (laserExportFormatSelect) {
+                laserExportFormatSelect.value = laserSettings.exportFormat || 'svg';
+                laserExportFormatSelect.addEventListener('change', (e) => {
+                    const format = e.target.value;
+                    this.ui.core.updateSettings('laser', { exportFormat: format });
+
+                    // Show/hide DPI field
+                    const dpiField = document.getElementById('laser-dpi-field');
+                    if (dpiField) dpiField.style.display = format === 'png' ? '' : 'none';
+
+                    // Show/hide PNG warning in sidebar and modal
+                    const sidebarPngWarning = document.getElementById('laser-png-sidebar-warning');
+                    if (sidebarPngWarning) sidebarPngWarning.style.display = format === 'png' ? '' : 'none';
+                    const modalPngWarning = document.getElementById('laser-png-warning');
+                    if (modalPngWarning) modalPngWarning.style.display = format === 'png' ? '' : 'none';
+
+                    // Invalidate geometry on format change — drill/cutout are always SVG vectors, unaffected
+                    this.invalidateLaserOperations(
+                        'Export format changed to ' + format.toUpperCase() + '. Geometry is incompatible.',
+                        ['isolation', 'clearing']
+                    );
+                });
+
+                // Apply initial visibility on load
+                const initialFormat = laserExportFormatSelect.value;
+                const dpiField = document.getElementById('laser-dpi-field');
+                if (dpiField) {
+                    dpiField.style.display = initialFormat === 'png' ? '' : 'none';
+                }
+                const sidebarPngWarning = document.getElementById('laser-png-sidebar-warning');
+                if (sidebarPngWarning) {
+                    sidebarPngWarning.style.display = initialFormat === 'png' ? '' : 'none';
+                }
             }
 
             // --- Universal fields ---
@@ -1114,8 +1198,9 @@
                 });
             }
 
-            // --- Apply initial visibility states ---
+            // Apply initial visibility states
             this.updateProcessorFieldVisibility(loadedSettings.gcode.postProcessor);
+            this.updatePipelineFieldVisibility();
             this.updateRolandSpindleVisibility(loadedSettings.machine.rolandSpindleMode || 'direct');
 
             // Apply initial Roland profile field states and sync textarea content
@@ -1151,6 +1236,16 @@
                     }
                 }
             }
+
+            // Reconfigure laser button
+            const reconfigBtn = document.getElementById('reconfigure-laser-btn');
+            if (reconfigBtn) {
+                reconfigBtn.addEventListener('click', () => {
+                    if (window.pcbcam?.modalManager) {
+                        window.pcbcam.modalManager.showModal('laserConfig');
+                    }
+                });
+            }
         }
 
         /**
@@ -1169,6 +1264,58 @@
             });
 
             this.debug(`Processor field visibility updated: ${processorName}`);
+        }
+
+        /**
+         * Shows/hides machine setting sections based on pipeline type.
+         * CNC: show cnc, hide laser. Laser: show laser, hide cnc. Hybrid: show both.
+         */
+        updatePipelineFieldVisibility() {
+            const controller = window.pcbcam;
+            if (!controller) return;
+
+            const pipelineType = controller.pipelineState.type;
+            const machineSection = document.querySelector('.sidebar-section.machine-section');
+            
+            if (!machineSection) return;
+
+            // Always show the Machine Settings section
+            machineSection.style.display = '';
+
+            const machineControls = document.getElementById('machine-controls');
+            if (!machineControls) return;
+
+            const isCNC = pipelineType === 'cnc' || pipelineType === 'hybrid';
+            // Inside the exportManager modal show handler:
+            const isLaser = window.pcbcam?.isLaserPipeline?.() || false;
+            const exportModal = document.getElementById('export-manager-modal');
+            if (exportModal) {
+                exportModal.querySelectorAll('[data-pipeline-group="cnc"]').forEach(el => {
+                    el.style.display = isLaser ? 'none' : '';
+                });
+                exportModal.querySelectorAll('[data-pipeline-group="laser"]').forEach(el => {
+                    el.style.display = isLaser ? '' : 'none';
+                });
+
+                // Update button labels
+                const calcBtn = document.getElementById('gcode-calculate-btn');
+                if (calcBtn) {
+                    calcBtn.textContent = isLaser ? 'Preview Export' : 'Calculate Toolpaths';
+                    calcBtn.style.display = isLaser ? 'none' : ''; // Hide for laser until exporter exists
+                }
+            }
+
+            // CNC-specific sections
+            machineControls.querySelectorAll('[data-pipeline-group="cnc"]').forEach(el => {
+                el.style.display = isCNC ? '' : 'none';
+            });
+
+            // Laser-specific sections
+            machineControls.querySelectorAll('[data-pipeline-group="laser"]').forEach(el => {
+                el.style.display = isLaser ? '' : 'none';
+            });
+
+            this.debug(`Pipeline field visibility updated: ${pipelineType} (CNC: ${isCNC}, Laser: ${isLaser})`);
         }
 
         /**
@@ -1194,7 +1341,7 @@
         updateRolandProfileFields(profile) {
             const rolandStepsInput = document.getElementById('roland-steps-per-mm');
             const rolandMaxFeedInput = document.getElementById('roland-max-feed');
-            // const rolandZModeSelect = document.getElementById('roland-z-mode'); // UNUSED, should it be?
+            // const rolandZModeSelect = document.getElementById('roland-z-mode'); // REVIEW - UNUSED, should it be used? Is it missing somewhere?
             const rolandSpindleModeSelect = document.getElementById('roland-spindle-mode');
             const rolandSpindleInput = document.getElementById('roland-spindle-speed');
             const rpmField = document.getElementById('roland-spindle-rpm-field');

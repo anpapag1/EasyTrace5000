@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <!--!
-        @file        doc/index.html
+        @file        easytrace5000/doc/index.html
         @description EasyTrace5000 Documentation
         @author      Eltryus - Ricardo Marques
         @copyright   2025-2026 Eltryus - Ricardo Marques
@@ -35,10 +35,10 @@
     <meta name="robots" content="index, follow">
     <meta name="theme-color" content="#1a1a1a">
 
-    <link rel="canonical" href="https://cam.eltryus.design/doc">
+    <link rel="canonical" href="https://cam.eltryus.design/easytrace5000/doc/">
 
     <meta property="og:type" content="website">
-    <meta property="og:url" content="https://cam.eltryus.design/doc">
+    <meta property="og:url" content="https://cam.eltryus.design/easytrace5000/doc/">
     <meta property="og:title" content="EasyTrace5000 | Documentation">
     <meta property="og:description" content="Guides and reference manual for EasyTrace5000 PCB CAM workflows.">
     <meta property="og:image" content="https://cam.eltryus.design/images/social-preview.jpg">
@@ -47,36 +47,39 @@
     <meta property="og:site_name" content="EasyTrace5000">
     <meta property="og:locale" content="en_US">
 
-    <link rel="icon" type="image/png" href="../images/favicon/favicon-96x96.png" sizes="96x96">
-    <link rel="icon" type="image/svg+xml" href="../images/favicon/favicon.svg">
-    <link rel="shortcut icon" href="../images/favicon/favicon.ico">
-    <link rel="apple-touch-icon" sizes="180x180" href="../images/favicon/apple-touch-icon.png">
-    <link rel="manifest" href="../images/favicon/site.webmanifest">
+    <link rel="icon" type="image/png" href="../../images/favicon/favicon-96x96.png" sizes="96x96">
+    <link rel="icon" type="image/svg+xml" href="../../images/favicon/favicon.svg">
+    <link rel="shortcut icon" href="../../images/favicon/favicon.ico">
+    <link rel="apple-touch-icon" sizes="180x180" href="../../images/favicon/apple-touch-icon.png">
+    <link rel="manifest" href="../../images/favicon/site.webmanifest">
 
-    <link rel="stylesheet" href="../css/base.css">
-    <link rel="stylesheet" href="../css/components.css">
-    <link rel="stylesheet" href="../css/theme.css">
-    <link rel="stylesheet" href="../css/doc.css">
+    <link rel="stylesheet" href="../../css/base.css">
+    <link rel="stylesheet" href="../../css/components.css">
+    <link rel="stylesheet" href="../../css/theme.css">
+    <link rel="stylesheet" href="../../css/doc.css">
 
     <script type="application/ld+json">
-    {
-      "@context": "https://schema.org",
-      "@type": "BreadcrumbList",
-      "itemListElement": [
+    [
         {
-          "@type": "ListItem",
-          "position": 1,
-          "name": "EasyTrace5000",
-          "item": "https://cam.eltryus.design/"
+            "@context": "https://schema.org",
+            "@type": "CollectionPage",
+            "headline": "EasyTrace5000 Documentation",
+            "description": "Guides and reference manual for EasyTrace5000 PCB CAM workflows, including CNC milling and Laser processing.",
+            "url": "https://cam.eltryus.design/easytrace5000/doc/",
+            "author": { "@type": "Organization", "name": "Eltryus" },
+            "publisher": { "@type": "Organization", "name": "Eltryus" },
+            "datePublished": "2025-01-16",
+            "dateModified": "2026-03-02"
         },
         {
-          "@type": "ListItem",
-          "position": 2,
-          "name": "Documentation",
-          "item": "https://cam.eltryus.design/doc"
+            "@context": "https://schema.org",
+            "@type": "BreadcrumbList",
+            "itemListElement": [
+                {"@type": "ListItem", "position": 1, "name": "EasyTrace5000", "item": "https://cam.eltryus.design/"},
+                {"@type": "ListItem", "position": 2, "name": "Documentation", "item": "https://cam.eltryus.design/easytrace5000/doc/"}
+            ]
         }
-      ]
-    }
+    ]
     </script>
 </head>
 <body>
@@ -102,7 +105,10 @@
         </button>
 
         <nav class="doc-nav" aria-label="Main Navigation">
-            <a href="/" draggable="false" aria-label="Return to Application">← Application</a>
+            <a href="/" draggable="false" aria-label="Return to Homepage">← Home</a>
+            <a href="/easytrace5000/" draggable="false" aria-label="Launch Workspace">Launch App</a>
+            <span class="separator" aria-hidden="true"></span>
+            
             <a href="./" class="active" draggable="false" aria-current="page" aria-label="Documentation Index">Docs</a>
             <a href="cnc" draggable="false" aria-label="CNC Milling Guide">CNC Guide</a>
             <a href="laser" draggable="false" aria-label="Laser Processing Guide">Laser Guide</a>
@@ -125,7 +131,7 @@
                 <p class="tagline">Browser-based CAM for PCB prototyping</p>
 
                 <figure>
-                    <img src="../images/EasyTrace5000_workspace.webp" alt="EasyTrace5000 Workspace">
+                    <img src="../../images/EasyTrace5000_workspace.webp" alt="EasyTrace5000 Workspace">
                     <figcaption>The EasyTrace5000 workspace with loaded PCB geometry</figcaption>
                 </figure>
 
@@ -200,15 +206,45 @@
 
             <!-- Quick Start -->
             <section id="quick-start">
-                <h2>Quick Start</h2>
-                <ol>
-                    <li><strong>Launch:</strong> Open the application. Use the Welcome modal to load "Example 1".</li>
-                    <li><strong>Explore:</strong> See the PCB geometry in the center canvas.</li>
-                    <li><strong>Select:</strong> Click the source file object in the "Isolation Routing" tree (left sidebar).</li>
-                    <li><strong>Generate:</strong> In the right sidebar, click <em>Generate Offsets</em>.</li>
-                    <li><strong>Preview:</strong> Click <em>Generate Toolpath Preview</em> to see the cut path.</li>
-                    <li><strong>Export:</strong> Click <em>Operations & G-Code</em>, calculate Toolpaths and then <em>Export G-code</em>.</li>
-                </ol>
+                <h2>Quick Start Guide</h2>
+                <p>The workflow adapts based on your chosen manufacturing method. Select your pipeline below:</p>
+
+                <div class="workflow-split">
+                    
+                    <div class="workflow-column workflow-column--cnc">
+                        <h3>
+                            <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="var(--color-pipeline-cnc)" stroke-width="1.5" aria-hidden="true" style="margin-right: 8px; vertical-align: text-bottom;">
+                                <circle cx="12" cy="12" r="3"/>
+                                <path d="M12 2v4M12 18v4M4.93 4.93l2.83 2.83M16.24 16.24l2.83 2.83M2 12h4M18 12h4M4.93 19.07l2.83-2.83M16.24 7.76l2.83-2.83"/>
+                            </svg>
+                            CNC Milling Workflow
+                        </h3>
+                        <ol>
+                            <li><strong>Load:</strong> Drag and drop your Gerber/Excellon files into the workspace.</li>
+                            <li><strong>Machine:</strong> Set your post-processor and other machine specific parameters.</li>
+                            <li><strong>Offsets:</strong> Select a tool diameter, set your passes, and click <em>Generate Offsets</em>.</li>
+                            <li><strong>Preview:</strong> Define your cut depth and entry strategy, then click <em>Generate Preview</em>.</li>
+                            <li><strong>Export:</strong> Open <em>Operations & G-Code</em>, configure your feeds and speeds, and export your G-code.</li>
+                        </ol>
+                    </div>
+
+                    <div class="workflow-column workflow-column--laser">
+                        <h3>
+                            <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="var(--color-pipeline-laser)" stroke-width="1.5" aria-hidden="true" style="margin-right: 8px; vertical-align: text-bottom;">
+                                <path d="M12 2v8"/><path d="M12 14v8"/><circle cx="12" cy="12" r="2"/>
+                                <path d="M4.93 4.93l4.24 4.24"/><path d="M14.83 14.83l4.24 4.24"/>
+                            </svg>
+                            Laser Processing Workflow
+                        </h3>
+                        <ol>
+                            <li><strong>Load:</strong> Drag and drop your Gerber/SVG files into the workspace.</li>
+                            <li><strong>Machine:</strong> Set your laser spot size and choose your export format (SVG or PNG).</li>
+                            <li><strong>Geometry:</strong> Choose a clearing strategy (Offset, Fill, or Hatch) and click <em>Generate Laser Paths</em>.</li>
+                            <li><strong>Export:</strong> Open the <em>Export Manager</em>, assign layer colors for your control software, and download.</li>
+                        </ol>
+                    </div>
+
+                </div>
             </section>
 
             <!-- Keyboard Shortcuts -->
@@ -304,7 +340,7 @@
                 <a href="#doc-content" draggable="false" aria-label="Scroll back to top">Back to Top</a> |
                 <a href="https://github.com/RicardoJCMarques/EasyTrace5000" target="_blank" draggable="false" aria-label="GitHub Repository (opens in a new tab)">GitHub</a> |
                 <a href="/#support" draggable="false" aria-label="Support Development via Sponsorship">Support Development</a> |
-                <a href="../LICENSE" target="_blank" draggable="false" aria-label="AGPLv3 License (opens in a new tab)">AGPLv3 Licensed</a>
+                <a href="../../LICENSE" target="_blank" draggable="false" aria-label="AGPLv3 License (opens in a new tab)">AGPLv3 Licensed</a>
             </p>
         </footer>
 

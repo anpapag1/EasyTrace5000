@@ -210,7 +210,7 @@ If you encounter accessibility barriers, please report them via **GitHub Issues*
 
 We have a dedicated template for these reports to ensure we get the necessary technical details.
 
-1. Go to the [New Issue page](https://github.com/RicardoJCMarques/Eltryus_CAM/issues/new/choose)
+1. Go to the [New Issue page](https://github.com/RicardoJCMarques/EasyTrace5000/issues/new/choose)
 2. Select the **Accessibility Report** template
 3. Fill in the required details (Browser, OS, Assistive Technology)
 

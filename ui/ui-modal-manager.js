@@ -29,7 +29,6 @@
     'use strict';
 
     const config = window.PCBCAMConfig ;
-    const debugConfig = config.debug;
     const textConfig = config.ui.text;
     const iconConfig = config.ui.icons;
     const storageKeys = config.storageKeys;
@@ -45,8 +44,9 @@
             // Modal references
             this.modals = {
                 welcome: document.getElementById('welcome-modal'),
+                laserConfig: document.getElementById('laser-config-modal'),
                 quickstart: document.getElementById('quickstart-modal'),
-                gcode: document.getElementById('gcode-export-modal'),
+                exportManager: document.getElementById('export-manager-modal'),
                 support: document.getElementById('support-modal'),
                 help: document.getElementById('help-modal')
             };
@@ -303,6 +303,75 @@
             return null;
         }
 
+        showLaserConfigHandler(options = {}) {
+            const modal = this.modals.laserConfig;
+            if (!modal) return;
+
+            const laserDefaults = config.laserDefaults || {};
+
+            // UV card — full laser pipeline
+            const uvCard = document.getElementById('laser-select-uv');
+            if (uvCard) {
+                uvCard.onclick = (e) => {
+                    e.preventDefault();
+                    const laserConfig = {
+                        laserType: 'uv',
+                        outputFormat: laserDefaults.outputFormat || 'svg',
+                        layerColors: { ...(laserDefaults.layerColors || {}) }
+                    };
+                    this.controller.setPipeline('laser', laserConfig);
+
+                    if (this.ui.controls) {
+                        this.ui.controls.updatePipelineFieldVisibility();
+                    }
+
+                    this.closeModal();
+                    this.showModal('quickstart', options);
+                };
+            }
+
+            // Fiber card — hybrid pipeline
+            const fiberCard = document.getElementById('laser-select-fiber');
+            if (fiberCard) {
+                fiberCard.onclick = (e) => {
+                    e.preventDefault();
+                    
+                    // --- HYBRID LOCK ---
+                    this.ui.showStatus('Hybrid pipeline is currently locked for testing.', 'info');
+                    return; 
+                    // -------------------
+
+                    /* COMMENTED OUT UNTIL READY:
+                    const laserConfig = {
+                        laserType: 'fiber',
+                        outputFormat: laserDefaults.outputFormat || 'svg',
+                        layerColors: { ...(laserDefaults.layerColors || {}) }
+                    };
+                    this.controller.setPipeline('hybrid', laserConfig);
+
+                    if (this.ui.controls) {
+                        this.ui.controls.updatePipelineFieldVisibility();
+                    }
+
+                    this.closeModal();
+                    this.showModal('quickstart', options);
+                    */
+                };
+            }
+
+            // Back button
+            const backBtn = document.getElementById('laser-config-back-btn');
+            if (backBtn) {
+                backBtn.onclick = () => this.closeModal();
+            }
+
+            // Close button
+            const closeBtn = document.getElementById('laser-config-close');
+            if (closeBtn) {
+                closeBtn.onclick = () => this.closeModal();
+            }
+        }
+
         showSupportHandler() {
             const modal = this.modals.support;
 
@@ -403,6 +472,7 @@
                 cncCard.onclick = (e) => {
                     e.preventDefault();
                     this.selectedPipeline = 'cnc';
+                    this.controller.setPipeline('cnc');
                     this.closeModal();
 
                     const hideWelcome = localStorage.getItem(storageKeys.hideWelcome);
@@ -412,12 +482,18 @@
                 };
             }
 
-            // Laser card - opens support modal
+            // Laser card - opens laser config modal
             const laserCard = document.getElementById('pipeline-laser');
             if (laserCard) {
                 laserCard.onclick = (e) => {
                     e.preventDefault();
-                    this.showModal('support');
+                    this.selectedPipeline = 'laser';
+                    this.closeModal();
+
+                    const hideWelcome = localStorage.getItem(storageKeys.hideWelcome);
+                    if (!hideWelcome) {
+                        this.showModal('laserConfig', options);
+                    }
                 };
             }
 
@@ -478,7 +554,7 @@
                 dontShowCheckbox.onchange = (e) => {
                     if (!e.target.checked) {
                         localStorage.removeItem(storageKeys.hideWelcome);
-                        this.ui?.statusManager?.showStatus('Quickstart will show on next visit', 'info');
+                        this.ui.showStatus('Quickstart will show on next visit', 'info');
                     }
                 };
             }
@@ -527,12 +603,16 @@
                 startEmptyBtn.onclick = () => this.handleQuickstartClose();
             }
 
-            // Back button
+            // Back button — pipeline-aware
             const backBtn = document.getElementById('quickstart-back-btn');
             if (backBtn) {
                 backBtn.onclick = () => {
                     this.closeModal();
-                    this.showModal('welcome');
+                    if (this.selectedPipeline === 'laser') {
+                        this.showModal('laserConfig');
+                    } else {
+                        this.showModal('welcome');
+                    }
                 };
             }
 
@@ -607,7 +687,7 @@
         handleQuickstartFile(file, opType, zone) {
             const validation = this.controller.core?.validateFileType(file.name, opType);
             if (validation && !validation.valid) {
-                this.ui?.statusManager?.showStatus(validation.message, 'error');
+                this.ui.showStatus(validation.message, 'error');
                 return;
             }
 
@@ -679,98 +759,298 @@
         }
 
         // Toolpath modal handler
-        showToolpathModal(operations, highlightOperationId = null) {
-            this.debug(`Opening toolpath manager with ${operations.length} operation(s)`);
+        showExportManagerHandler(options = {}) {
+            const operations = options.operations || [];
+            const highlightOperationId = options.highlightOperationId || null;
 
-            // Helper function to get the desired sort order
+            this.debug(`Opening Export Manager with ${operations.length} operation(s)`);
+
             const getSortOrder = (opType) => {
                 switch (opType) {
                     case 'isolation': return 1;
+                    case 'laser_isolation': return 1;
                     case 'clearing':  return 2;
                     case 'drill':     return 3;
                     case 'cutout':    return 4;
-                    default:          return 0; // Put any other types (if they exist) first
+                    default:          return 5; 
                 }
             };
 
-            // Sort the incoming operations array based on the priority
-            const sortedOperations = operations.sort((a, b) => {
-                return getSortOrder(a.type) - getSortOrder(b.type);
+            this.selectedOperations = operations.sort((a, b) => getSortOrder(a.type) - getSortOrder(b.type));
+            this.highlightedOpId = highlightOperationId;
+
+            // Check which operations actually exist in this job
+            this.jobHasLaser = this.selectedOperations.some(op => this.controller.isLaserExportForOperation(op.type));
+            this.jobHasCNC = this.selectedOperations.some(op => !this.controller.isLaserExportForOperation(op.type));
+
+            const laserOptions = document.getElementById('export-laser-options');
+            const cncOptions = document.getElementById('export-cnc-options');
+            const cncPreview = document.getElementById('export-cnc-preview');
+            const leftColumnWrapper = document.querySelector('.gcode-options');
+
+            // Set the MACRO layout based on the job contents (no layout shifting later)
+            if (laserOptions) laserOptions.style.display = this.jobHasLaser ? 'block' : 'none';
+            if (cncOptions) cncOptions.style.display = this.jobHasCNC ? 'block' : 'none';
+            if (cncPreview) cncPreview.style.display = this.jobHasCNC ? 'flex' : 'none';
+
+            // Fix the grid sizing if CNC preview is completely gone
+            if (leftColumnWrapper) {
+                leftColumnWrapper.classList.toggle('is-full-width', this.jobHasLaser && !this.jobHasCNC);
+            }
+
+            this.populateExportOperationsList();
+            this.updateExportBlocksVisibility(); // Apply the micro-state (gray out)
+            this.setupExportHandlers();
+
+            // Wire PNG warning and DPI visibility to the machine laser export format setting
+            const laserFormat = window.pcbcam?.core?.settings?.laser?.exportFormat || 'svg';
+            
+            const pngWarning = document.getElementById('laser-png-warning');
+            if (pngWarning) pngWarning.style.display = laserFormat === 'png' ? '' : 'none';
+
+            const dpiField = document.getElementById('laser-dpi-field');
+            if (dpiField) dpiField.style.display = laserFormat === 'png' ? '' : 'none';
+
+            // Populate padding and DPI from settings
+            const laserSettings = this.controller.core?.settings?.laser || {};
+            
+            const paddingInput = document.getElementById('laser-export-padding');
+            if (paddingInput) {
+                paddingInput.value = laserSettings.exportPadding ?? config.laserDefaults?.exportPadding ?? 5.0;
+            }
+
+            const dpiInput = document.getElementById('laser-export-dpi');
+            if (dpiInput) {
+                dpiInput.value = laserSettings.exportDPI ?? config.laserDefaults?.rasterDPI ?? 1000;
+            }
+        }
+
+        populateExportOperationsList() {
+            const list = document.getElementById('export-operation-order');
+            if (!list) return;
+            list.innerHTML = '';
+
+            for (const op of this.selectedOperations) {
+                const item = document.createElement('div');
+                item.className = 'file-node-content';
+                item.dataset.operationId = op.id;
+
+                const isLaserRoute = this.controller.isLaserExportForOperation(op.type);
+                const routeBadge = isLaserRoute ? '<span class="export-route-badge export-route-badge--laser">LASER</span>' : '<span class="export-route-badge export-route-badge--cnc">CNC</span>';
+
+                item.innerHTML = `
+                    <span class="tree-expand-icon">${iconConfig.modalDragHandle}</span>
+                    <input type="checkbox" class="export-op-checkbox" id="exp-check-${op.id}" checked>
+                    <label for="exp-check-${op.id}">
+                        ${op.type}: ${op.file.name}
+                        ${routeBadge}
+                    </label>
+                `;
+
+                // Re-evaluate visibility when checkboxes change
+                const checkbox = item.querySelector('input');
+                checkbox.addEventListener('change', () => this.updateExportBlocksVisibility());
+
+                list.appendChild(item);
+            }
+
+            this.makeSortable(list);
+        }
+
+        updateExportBlocksVisibility() {
+            // Don't change display:none here. Only toggle the .is-disabled class.
+            const cncOptions = document.getElementById('export-cnc-options');
+            const cncPreview = document.getElementById('export-cnc-preview');
+            const calcBtn = document.getElementById('gcode-calculate-btn');
+            const laserOptions = document.getElementById('export-laser-options');
+            const list = document.getElementById('export-operation-order');
+            
+            let hasCheckedLaser = false;
+            let hasCheckedCNC = false;
+
+            // Check what the user currently has checked
+            if (list) {
+                list.querySelectorAll('.file-node-content').forEach(item => {
+                    const checkbox = item.querySelector('input[type="checkbox"]');
+                    if (checkbox && checkbox.checked) {
+                        const op = this.selectedOperations.find(o => o.id === item.dataset.operationId);
+                        if (op) {
+                            if (this.controller.isLaserExportForOperation(op.type)) hasCheckedLaser = true;
+                            else hasCheckedCNC = true;
+                        }
+                    }
+                });
+            }
+
+            // MICRO STATE: Disable (gray out) blocks if their corresponding ops are unchecked
+            if (cncOptions) cncOptions.classList.toggle('is-disabled', !hasCheckedCNC);
+            if (cncPreview) cncPreview.classList.toggle('is-disabled', !hasCheckedCNC);
+            if (calcBtn) {
+                calcBtn.disabled = !hasCheckedCNC;
+                calcBtn.style.opacity = hasCheckedCNC ? '1' : '0.5';
+            }
+            
+            if (laserOptions) laserOptions.classList.toggle('is-disabled', !hasCheckedLaser);
+        }
+
+        setupExportHandlers() {
+            const cancelBtn = document.getElementById('export-cancel-btn');
+            const executeBtn = document.getElementById('export-execute-btn');
+            const calcBtn = document.getElementById('gcode-calculate-btn');
+            const closeBtn = this.modals.exportManager?.querySelector('.modal-close');
+
+            if (cancelBtn) cancelBtn.onclick = () => this.closeModal();
+            if (closeBtn) closeBtn.onclick = () => this.closeModal();
+            
+            if (calcBtn) {
+                calcBtn.onclick = () => this.runToolpathOrchestration(calcBtn);
+            }
+
+            if (executeBtn) {
+                executeBtn.onclick = async () => {
+                    await this.executeUnifiedExport();
+                };
+            }
+        }
+
+        async executeUnifiedExport() {
+            // Gather all checked operations
+            const list = document.getElementById('export-operation-order');
+            const activeOpIds = [];
+
+            if (list) {
+                list.querySelectorAll('.file-node-content').forEach(item => {
+                    const checkbox = item.querySelector('input[type="checkbox"]');
+                    if (checkbox && checkbox.checked) {
+                        activeOpIds.push(item.dataset.operationId);
+                    }
+                });
+            }
+
+            // Safeguard: Did they uncheck everything?
+            if (activeOpIds.length === 0) {
+                this.ui.showStatus('No operations selected for export.', 'warning');
+                return;
+            }
+
+            // Separate into pipelines & Get Shared Settings
+            const laserOps = [];
+            const cncOps = [];
+
+            activeOpIds.forEach(id => {
+                const op = this.selectedOperations.find(o => o.id === id);
+                if (op) {
+                    if (this.controller.isLaserExportForOperation(op.type)) {
+                        laserOps.push(op);
+                    } else {
+                        cncOps.push(op);
+                    }
+                }
             });
 
-            // Store the *sorted* operations
-            this.selectedOperations = sortedOperations;
-            this.highlightedOpId = highlightOperationId;
-            this.toolpathPlans.clear();
+            // Get shared base name, strip any accidental extensions user might type
+            let rawBaseName = document.getElementById('export-filename')?.value || 'pcb-output';
+            const baseName = rawBaseName.replace(/\.[^/.]+$/, ""); 
+            const isSingleFile = document.getElementById('export-single-file')?.checked !== false;
 
-            this.attachGcodeModalTooltips();
+            let cncSuccess = false;
+            let laserSuccess = false;
 
-            // Get the modal's dropdown
-            const modalPostSelect = document.getElementById('gcode-post-processor');
-            
-            // Get the *current* setting from the core
-            const currentPost = this.controller.core?.getSetting('gcode', 'postProcessor') || 'grbl';
-
-            if (modalPostSelect) {
-                // Populate it (if it's empty)
-                if (modalPostSelect.options.length === 0) {
-                    const options = config.ui?.parameterOptions?.postProcessor || [{ value: 'grbl', label: 'GRBL (Default)' }];
-                    options.forEach(opt => {
-                        const optionEl = document.createElement('option');
-                        optionEl.value = opt.value;
-                        optionEl.textContent = opt.label;
-                        modalPostSelect.appendChild(optionEl);
-                    });
+            // Export CNC (G-CODE)
+            if (cncOps.length > 0) {
+                const previewText = document.getElementById('gcode-preview-text');
+                const isRoland = this.controller.core?.settings?.gcode?.postProcessor === 'roland';
+                const cncExt = isRoland ? '.rml' : '.nc';
+                const finalCncFilename = `${baseName}${cncExt}`;
+                
+                let gcodeContent = previewText ? previewText.value : '';
+                
+                // Smart Feature: Auto-calculate if not done
+                if (!gcodeContent || gcodeContent.startsWith(';') || gcodeContent === textConfig.gcodePlaceholder) {
+                    this.ui.showStatus('Auto-calculating G-Code...', 'info');
+                    const calcBtn = document.getElementById('gcode-calculate-btn');
+                    await this.runToolpathOrchestration(calcBtn, cncOps); 
+                    gcodeContent = previewText ? previewText.value : '';
                 }
 
-                // Set its value to match the core setting
-                modalPostSelect.value = currentPost;
-            }
-
-            // Set corresponding file extension
-            const filenameInput = document.getElementById('gcode-filename');
-            if (filenameInput && this.controller.gcodeGenerator) {
-                // Get the info for the currently selected processor
-                const processorInfo = this.controller.gcodeGenerator.getProcessorInfo(currentPost);
-                if (processorInfo) {
-                    const currentFilename = filenameInput.value;
-                    const newFilename = currentFilename.replace(/\.[^.]+$/, processorInfo.fileExtension);
-                    filenameInput.value = newFilename;
-                }
-            }
-
-            this.showModal('gcode');
-
-            // Update modal title
-            const modal = this.modals.gcode;
-            const header = modal.querySelector('.modal-header h2');
-            if (header) header.textContent = 'Operations Manager';
-
-            // UI Polish: Disable incompatible options for Roland
-            const commentsCheckbox = document.getElementById('gcode-include-comments');
-            const toolChangeCheckbox = document.getElementById('gcode-tool-changes'); // Optional: Roland handles TCs differently
-
-            if (commentsCheckbox) {
-                if (currentPost === 'roland') {
-                    // Disable and uncheck to prevent RML errors
-                    commentsCheckbox.checked = false;
-                    commentsCheckbox.disabled = true;
-                    commentsCheckbox.parentElement.title = "Comments are disabled for Roland RML to prevent syntax errors.";
-                    commentsCheckbox.parentElement.classList.add('disabled-control'); // Add visual cue if you have CSS for it
+                // Verify calculation succeeded, then download
+                if (gcodeContent && !gcodeContent.startsWith('; Generation Failed')) {
+                    const blob = new Blob([gcodeContent], { type: 'text/plain' });
+                    const url = URL.createObjectURL(blob);
+                    const a = document.createElement('a');
+                    a.href = url;
+                    a.download = finalCncFilename;
+                    document.body.appendChild(a);
+                    a.click();
+                    document.body.removeChild(a);
+                    URL.revokeObjectURL(url);
+                    cncSuccess = true;
                 } else {
-                    // Restore defaults for G-code
-                    commentsCheckbox.disabled = false;
-                    commentsCheckbox.checked = true; // Or restore from settings
-                    commentsCheckbox.parentElement.title = "";
-                    commentsCheckbox.parentElement.classList.remove('disabled-control');
+                    this.ui.showStatus('G-code generation failed.', 'error');
                 }
             }
 
-            this.populateToolpathModal();
+            // Export LASER (SVG / PNG)
+            if (laserOps.length > 0) {
+                const unreadyOps = laserOps.filter(op => !op.offsets || op.offsets.length === 0);
+                if (unreadyOps.length > 0) {
+                    const names = unreadyOps.map(o => o.file.name).join(', ');
+                    this.ui.showStatus(`Cannot export: Generate laser paths for ${names} first.`, 'error');
+                } else {
+                    const colors = {
+                        isolation: document.getElementById('laser-export-color-isolation')?.value || '#ff0000',
+                        drill: document.getElementById('laser-export-color-drill')?.value || '#0000ff',
+                        clearing: document.getElementById('laser-export-color-clearing')?.value || '#00ff00',
+                        cutout: document.getElementById('laser-export-color-cutout')?.value || '#000000'
+                    };
 
-            this.showPlaceholderPreview();
+                    // Grab dynamic modal values
+                    const laserSettings = this.controller.core?.settings?.laser || {};
+                    const paddingInput = document.getElementById('laser-export-padding');
+                    const dpiInput = document.getElementById('laser-export-dpi');
 
-            this.setupToolpathHandlers();
+                    const exportPadding = paddingInput ? parseFloat(paddingInput.value) : 5.0;
+                    const exportDPI = dpiInput ? parseInt(dpiInput.value, 10) : 1000;
+
+                    // Save choices to core settings for persistence
+                    this.controller.core?.updateSettings('laser', { 
+                        exportPadding: exportPadding,
+                        exportDPI: exportDPI 
+                    });
+
+                    try {
+                        // Pass the dynamic values into the orchestrator
+                        const result = await this.controller.orchestrateLaserExport(laserOps, {
+                            layerColors: colors,
+                            format: laserSettings.exportFormat || 'svg',
+                            dpi: exportDPI,
+                            padding: exportPadding,
+                            singleFile: isSingleFile,
+                            baseName: baseName 
+                        });
+
+                        if (result.success) {
+                            laserSuccess = true;
+                        } else {
+                            this.ui.showStatus('Laser export produced no output — check that paths are generated.', 'error');
+                        }
+                    } catch (error) {
+                        console.error('[ModalManager] Laser export failed:', error);
+                        this.ui.showStatus('Laser export failed: ' + error.message, 'error');
+                    }
+                }
+            }
+
+            // Wrap up
+            if (cncSuccess || laserSuccess) {
+                const parts = [];
+                if (cncSuccess) parts.push('G-code');
+                if (laserSuccess) parts.push('Laser');
+                this.ui.showStatus(`${parts.join(' + ')} export completed successfully`, 'success');
+                this.closeModal();
+            } else if (cncOps.length === 0 && laserOps.length === 0) {
+                this.ui.showStatus('No operations to export.', 'warning');
+            }
         }
 
         attachGcodeModalTooltips() {
@@ -818,11 +1098,13 @@
 
             // Attach to checkboxes and inputs
             attachTo('gcode-post-processor', 'tooltips.modals.gcode.postProcessor');
-            attachTo('gcode-single-file', 'tooltips.modals.gcode.singleFile');
             attachTo('gcode-include-comments', 'tooltips.modals.gcode.includeComments');
             attachTo('gcode-tool-changes', 'tooltips.modals.gcode.toolChanges');
             attachTo('gcode-optimize-paths', 'tooltips.modals.gcode.optimize');
-            attachTo('gcode-filename', 'tooltips.modals.gcode.filename');
+            attachTo('export-single-file', 'tooltips.modals.gcode.singleFile');
+            attachTo('export-filename', 'tooltips.modals.gcode.filename');
+            attachTo('laser-export-dpi', 'tooltips.machineSettings.laserExportDPI');
+            attachTo('laser-export-padding', 'tooltips.machineSettings.laserExportPadding');
 
             // Attach to calculate button
             const calcBtn = document.getElementById('gcode-calculate-btn');
@@ -834,62 +1116,24 @@
             }
         }
 
-        populateToolpathModal() {
-            const list = document.getElementById('gcode-operation-order');
-            if (!list) {
-                console.error('[UI-ModalManager] #gcode-operation-order list not found!');
-                return;
-            }
-
-            list.innerHTML = '';
-
-            for (const op of this.selectedOperations) {
-                const item = this.createOperationItem(op);
-                list.appendChild(item);
-            }
-
-            // Make the correct list sortable
-            this.makeSortable(list);
-
-            // Clear the other list (gcode-operation-list) in case it had old content // Review - Does the operation-list data-structure still exist?
-            const checklist = document.getElementById('gcode-operation-list');
-            if (checklist) {
-                checklist.innerHTML = ''; // This list is not used by this function
-            }
-
-            // Initialize checkbox state from config
-            const optimizeCheckbox = document.getElementById('gcode-optimize-paths');
-            if (optimizeCheckbox && config.gcode) {
-                // Use the master switch 'enableOptimization'
-                optimizeCheckbox.checked = config.gcode.enableOptimization;
-            }
-        }
-
-        createOperationItem(operation) { // Review - There shouldn't be any CSS here
+        createOperationItem(operation) {
             const item = document.createElement('div');
             item.className = 'file-node-content';
-            item.style.marginBottom = 'var(--spacing-xs)';
-            item.style.cursor = 'grab'; // Cue for dragging
             item.dataset.operationId = operation.id;
 
             const checkbox = document.createElement('input');
             checkbox.type = 'checkbox';
             checkbox.checked = true;
             checkbox.id = `op-check-${operation.id}`;
-            checkbox.style.margin = '0 var(--spacing-sm) 0 0'; // Add some spacing
 
             const dragHandle = document.createElement('span');
             dragHandle.className = 'tree-expand-icon'; // Was 'drag-handle'
             dragHandle.innerHTML = iconConfig.modalDragHandle;
-            dragHandle.style.cursor = 'grab';
-            dragHandle.style.marginRight = 'var(--spacing-sm)';
 
             const label = document.createElement('label');
             label.htmlFor = checkbox.id;
             label.className = 'file-label'; // Was part of the item
             label.textContent = `${operation.type}: ${operation.file.name}`;
-            label.style.cursor = 'grab';
-            label.style.flex = '1'; // Ensure it takes up space
 
             // Clear default field children and rebuild
             item.innerHTML = ''; 
@@ -900,9 +1144,6 @@
             // Show key parameters
             const params = document.createElement('div');
             params.className = 'geometry-info';
-            params.style.fontSize = 'var(--font-size-xs)';
-            params.style.color = 'var(--color-text-hint)';
-            params.style.fontFamily = 'var(--font-mono)';
 
             const tool = operation.settings.tool?.diameter;
             const depth = operation.settings.cutDepth;
@@ -976,7 +1217,7 @@
                         focused.setAttribute('aria-grabbed', 'false');
                         focused.classList.remove('is-grabbed');
                         grabbedItem = null;
-                        this.ui?.statusManager?.showStatus('Item placed', 'info');
+                        this.ui.showStatus('Item placed', 'info');
                     } else {
                         // Grab - release any other grabbed item first
                         items.forEach(item => {
@@ -986,7 +1227,7 @@
                         focused.setAttribute('aria-grabbed', 'true');
                         focused.classList.add('is-grabbed');
                         grabbedItem = focused;
-                        this.ui?.statusManager?.showStatus('Item grabbed. Use Up/Down to move, Space to place.', 'info');
+                        this.ui.showStatus('Item grabbed. Use Up/Down to move, Space to place.', 'info');
                     }
                 }
 
@@ -1024,7 +1265,7 @@
                     focused.setAttribute('aria-grabbed', 'false');
                     focused.classList.remove('is-grabbed');
                     grabbedItem = null;
-                    this.ui?.statusManager?.showStatus('Reorder cancelled', 'info');
+                    this.ui.showStatus('Reorder cancelled', 'info');
                 }
             });
         }
@@ -1044,32 +1285,30 @@
             }, { offset: Number.NEGATIVE_INFINITY }).element;
         }
 
-        async runToolpathOrchestration(btn) {
-            // Show loading state
+        async runToolpathOrchestration(btn, explicitOps = null) {
             const originalText = btn.textContent;
             btn.textContent = 'Calculating...';
             btn.disabled = true;
 
             try {
-                // Find the correct list and items
-                const list = document.getElementById('gcode-operation-order');
-                if (!list) {
-                    console.error("[UI-ModalManager] Could not find list 'gcode-operation-order'");
-                    this.showPlaceholderPreview();
-                    return;
+                // If explicitOps is passed (from auto-export), use them. Otherwise read from DOM.
+                let selectedItemIds = [];
+                if (explicitOps) {
+                    selectedItemIds = explicitOps.map(o => o.id);
+                } else {
+                    const list = document.getElementById('export-operation-order');
+                    list.querySelectorAll('.file-node-content').forEach(item => {
+                        const checkbox = item.querySelector('input[type="checkbox"]');
+                        const op = this.selectedOperations.find(o => o.id === item.dataset.operationId);
+                        // Only calculate G-code for CNC ops
+                        if (checkbox?.checked && !this.controller.isLaserExportForOperation(op.type)) {
+                            selectedItemIds.push(item.dataset.operationId);
+                        }
+                    });
                 }
 
-                const selectedItemIds = [];
-                list.querySelectorAll('.file-node-content').forEach(item => {
-                    const checkbox = item.querySelector('input[type="checkbox"]');
-                    if (checkbox?.checked) {
-                        selectedItemIds.push(item.dataset.operationId);
-                    }
-                });
-
                 if (selectedItemIds.length === 0) {
-                    this.showPlaceholderPreview();
-                    this.ui?.statusManager?.showStatus('No operations selected', 'info');
+                    this.ui.showStatus('No CNC operations selected for calculation', 'info');
                     return;
                 }
 
@@ -1082,7 +1321,7 @@
                 if (opsWithoutPreview.length > 0) {
                     this.showPlaceholderPreview();
                     const names = opsWithoutPreview.map(o => o.file.name).join(', ');
-                    this.ui?.statusManager?.showStatus(
+                    this.ui.showStatus(
                         `Operations missing Preview: ${names}. Please generate previews first.`,
                         'warning'
                     );
@@ -1109,7 +1348,7 @@
 
                 if (!result || !result.gcode) {
                     this.showPlaceholderPreview();
-                    this.ui?.statusManager?.showStatus('Calculation returned no G-code', 'warning');
+                    this.ui.showStatus('Calculation returned no G-code', 'warning');
                     return;
                 }
 
@@ -1138,84 +1377,12 @@
             } catch (error) {
                 console.error('[UI-ModalManager] Orchestration failed:', error);
                 this.showPlaceholderPreview();
-                this.ui?.statusManager?.showStatus(`Failed: ${error.message}`, 'error');
+                this.ui.showStatus(`Failed: ${error.message}`, 'error');
             } finally {
                 // Restore button
                 btn.textContent = originalText;
                 btn.disabled = false;
             }
-        }
-        
-        setupToolpathHandlers() {
-            // Cancel button
-            const cancelBtn = document.getElementById('gcode-cancel-btn');
-            if (cancelBtn) {
-                cancelBtn.onclick = () => this.closeModal();
-            }
-
-            // Calculate button
-            const calculateBtn = document.getElementById('gcode-calculate-btn');
-            if (calculateBtn) {
-                calculateBtn.onclick = () => {
-                    this.runToolpathOrchestration(calculateBtn);
-                };
-            }
-
-            // Export button
-            const exportBtn = document.getElementById('gcode-export-btn');
-            if (exportBtn) {
-                exportBtn.onclick = () => this.exportGCode();
-            }
-
-            // Close button
-            const closeBtn = this.modals.gcode?.querySelector('.modal-close');
-            if (closeBtn) {
-                closeBtn.onclick = () => this.closeModal();
-            }
-        }
-
-        exportGCode() {
-            const previewText = document.getElementById('gcode-preview-text');
-            const filename = document.getElementById('gcode-filename')?.value || textConfig.gcodeDefaultFilename || 'output.nc';
-
-            // Get the placeholder text from the config
-            const placeholder = textConfig.gcodePlaceholder;
-            const gcodeContent = previewText.value;
-
-            if (!previewText || !gcodeContent) {
-                alert(textConfig.gcodeNoExportAlert);
-                return;
-            }
-
-            // Check if the content is exactly the placeholder
-            if (gcodeContent === placeholder) {
-                alert(textConfig.gcodeNoExportAlert);
-                return;
-            }
-
-            // Check for our known "error" messages that start with ';'
-            if (gcodeContent.startsWith('; No toolpath data available') || 
-                gcodeContent.startsWith('; No operations selected') || 
-                gcodeContent.startsWith('; Generation Failed')) 
-            {
-                alert(textConfig.gcodeNoExportAlert);
-                return;
-            }
-
-            // Create download
-            const blob = new Blob([gcodeContent], { type: 'text/plain' });
-            const url = URL.createObjectURL(blob);
-            const a = document.createElement('a');
-            a.href = url;
-            a.download = filename;
-            a.click();
-            URL.revokeObjectURL(url);
-
-            if (this.controller.ui?.statusManager) {
-                this.controller.ui.statusManager.showStatus('G-code exported successfully', 'success');
-            }
-
-            this.closeModal();
         }
 
         setupFocusTrap(modal) {
@@ -1371,12 +1538,8 @@
         }
 
         debug(message, data = null) {
-            if (debugConfig.enabled) {
-                if (data) {
-                    console.log(`[UI-ModalManager] ${message}`, data);
-                } else {
-                    console.log(`[UI-ModalManager] ${message}`);
-                }
+            if (this.ui.debug) {
+                this.ui.debug(`[UI-ModalManager] ${message}`, data);
             }
         }
     }

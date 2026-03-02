@@ -31,10 +31,10 @@ const { execSync } = require('child_process');
 
 // Configuration
 const CONFIG = {
-    input: 'doc/ACCESSIBILITY.md',
-    output: 'doc/accessibility.html',
-    cssPath: '../css',
-    themeScriptPath: '../themes/theme-loader.js',
+    input: 'easytrace5000/doc/ACCESSIBILITY.md',
+    output: 'easytrace5000/doc/accessibility.html',
+    cssPath: '../../css',
+    themeScriptPath: '../../themes/theme-loader.js',
     githubUrl: 'https://github.com/RicardoJCMarques/EasyTrace5000',
     siteUrl: 'https://cam.eltryus.design'
 };
@@ -172,7 +172,7 @@ const getTemplate = (sidebarHtml, mainBodyHtml, heroTitle, tagline) => `<!DOCTYP
 <head>
     <meta charset="UTF-8">
     <!--!
-        @file        doc/accessibility.html
+        @file        easytrace5000/doc/accessibility.html
         @description Accessibility Guide
         @author      Eltryus - Ricardo Marques
         @copyright   2025-2026 Eltryus - Ricardo Marques
@@ -204,10 +204,10 @@ const getTemplate = (sidebarHtml, mainBodyHtml, heroTitle, tagline) => `<!DOCTYP
     <meta name="robots" content="index, follow">
     <meta name="theme-color" content="#1a1a1a">
 
-    <link rel="canonical" href="${CONFIG.siteUrl}/doc/accessibility">
+    <link rel="canonical" href="${CONFIG.siteUrl}/easytrace5000/doc/accessibility">
 
     <meta property="og:type" content="article">
-    <meta property="og:url" content="${CONFIG.siteUrl}/doc/accessibility">
+    <meta property="og:url" content="${CONFIG.siteUrl}/easytrace5000/doc/accessibility">
     <meta property="og:title" content="EasyTrace5000 | Accessibility">
     <meta property="og:description" content="Keyboard controls and accessibility compliance for EasyTrace5000.">
     <meta property="og:image" content="${CONFIG.siteUrl}/images/social-preview.jpg">
@@ -216,11 +216,11 @@ const getTemplate = (sidebarHtml, mainBodyHtml, heroTitle, tagline) => `<!DOCTYP
     <meta property="og:site_name" content="EasyTrace5000">
     <meta property="og:locale" content="en_US">
 
-    <link rel="icon" type="image/png" href="../images/favicon/favicon-96x96.png" sizes="96x96">
-    <link rel="icon" type="image/svg+xml" href="../images/favicon/favicon.svg">
-    <link rel="shortcut icon" href="../images/favicon/favicon.ico">
-    <link rel="apple-touch-icon" sizes="180x180" href="../images/favicon/apple-touch-icon.png">
-    <link rel="manifest" href="../images/favicon/site.webmanifest">
+    <link rel="icon" type="image/png" href="../../images/favicon/favicon-96x96.png" sizes="96x96">
+    <link rel="icon" type="image/svg+xml" href="../../images/favicon/favicon.svg">
+    <link rel="shortcut icon" href="../../images/favicon/favicon.ico">
+    <link rel="apple-touch-icon" sizes="180x180" href="../../images/favicon/apple-touch-icon.png">
+    <link rel="manifest" href="../../images/favicon/site.webmanifest">
 
     <link rel="stylesheet" href="${CONFIG.cssPath}/base.css">
     <link rel="stylesheet" href="${CONFIG.cssPath}/components.css">
@@ -228,15 +228,28 @@ const getTemplate = (sidebarHtml, mainBodyHtml, heroTitle, tagline) => `<!DOCTYP
     <link rel="stylesheet" href="${CONFIG.cssPath}/doc.css">
 
     <script type="application/ld+json">
-    {
-      "@context": "https://schema.org",
-      "@type": "BreadcrumbList",
-      "itemListElement": [
-        { "@type": "ListItem", "position": 1, "name": "EasyTrace5000", "item": "${CONFIG.siteUrl}/" },
-        { "@type": "ListItem", "position": 2, "name": "Documentation", "item": "${CONFIG.siteUrl}/doc" },
-        { "@type": "ListItem", "position": 3, "name": "Accessibility", "item": "${CONFIG.siteUrl}/doc/accessibility" }
-      ]
-    }
+    [
+        {
+            "@context": "https://schema.org",
+            "@type": "TechArticle",
+            "headline": "Accessibility Information for EasyTrace5000",
+            "description": "Details on keyboard navigation, focus management, screen reader support, and WCAG 2.1 compliance for the EasyTrace5000 PCB CAM workspace.",
+            "image": "${CONFIG.siteUrl}/images/social-preview.jpg",
+            "author": { "@type": "Organization", "name": "Eltryus" },
+            "publisher": { "@type": "Organization", "name": "Eltryus" },
+            "datePublished": "2025-01-16",
+            "dateModified": "2026-02-26"
+        },
+        {
+            "@context": "https://schema.org",
+            "@type": "BreadcrumbList",
+            "itemListElement": [
+                { "@type": "ListItem", "position": 1, "name": "EasyTrace5000", "item": "${CONFIG.siteUrl}/" },
+                { "@type": "ListItem", "position": 2, "name": "Documentation", "item": "${CONFIG.siteUrl}/easytrace5000/doc/" },
+                { "@type": "ListItem", "position": 3, "name": "Accessibility", "item": "${CONFIG.siteUrl}/easytrace5000/doc/accessibility" }
+            ]
+        }
+    ]
     </script>
 </head>
 <body>
@@ -262,13 +275,16 @@ const getTemplate = (sidebarHtml, mainBodyHtml, heroTitle, tagline) => `<!DOCTYP
         </button>
 
         <nav class="doc-nav" aria-label="Main Navigation">
-            <a href="../" draggable="false" aria-label="Return to Application">← Application</a>
+            <a href="/" draggable="false" aria-label="Return to Homepage">← Home</a>
+            <a href="/easytrace5000/" draggable="false" aria-label="Launch Workspace">Launch App</a>
+            <span class="separator" aria-hidden="true"></span>
+
             <a href="./" draggable="false" aria-label="Documentation Index">Docs</a>
             <a href="cnc" draggable="false" aria-label="CNC Milling Guide">CNC Guide</a>
             <a href="laser" draggable="false" aria-label="Laser Processing Guide">Laser Guide</a>
-            <a href="accessibility" class="active" draggable="false" aria-current="page" aria-label="Accessibility Information">Accessibility</a>
+            <a href="accessibility" class="active" draggable="false" aria-current="page" aria-label="Accessibility Statement">Accessibility</a>
             <span class="separator" aria-hidden="true"></span>
-            <a href="${CONFIG.githubUrl}" target="_blank" draggable="false" aria-label="GitHub Repository (opens in a new tab)">GitHub</a>
+            <a href="https://github.com/RicardoJCMarques/EasyTrace5000" target="_blank" draggable="false" aria-label="GitHub Repository (opens in a new tab)">GitHub</a>
 
             <button class="theme-toggle" id="theme-toggle" title="Toggle Theme" aria-label="Toggle between light and dark theme">
                 <svg class="sun-icon" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" aria-hidden="true"><circle cx="12" cy="12" r="5"></circle><line x1="12" y1="1" x2="12" y2="3"></line><line x1="12" y1="21" x2="12" y2="23"></line><line x1="4.22" y1="4.22" x2="5.64" y2="5.64"></line><line x1="18.36" y1="18.36" x2="19.78" y2="19.78"></line><line x1="1" y1="12" x2="3" y2="12"></line><line x1="21" y1="12" x2="23" y2="12"></line><line x1="4.22" y1="19.78" x2="5.64" y2="18.36"></line><line x1="18.36" y1="5.64" x2="19.78" y2="4.22"></line></svg>
@@ -299,7 +315,7 @@ ${mainBodyHtml}
                 <a href="#doc-content" draggable="false" aria-label="Scroll back to top">Back to Top</a> |
                 <a href="${CONFIG.githubUrl}" target="_blank" draggable="false" aria-label="GitHub Repository (opens in a new tab)">GitHub</a> |
                 <a href="/#support" draggable="false" aria-label="Support Development via Sponsorship">Support Development</a> |
-                <a href="../LICENSE" target="_blank" draggable="false" aria-label="AGPLv3 License (opens in a new tab)">AGPLv3 Licensed</a>
+                <a href="../../LICENSE" target="_blank" draggable="false" aria-label="AGPLv3 License (opens in a new tab)">AGPLv3 Licensed</a>
             </p>
         </footer>
     </div>
@@ -308,11 +324,16 @@ ${mainBodyHtml}
     <script defer src="${CONFIG.themeScriptPath}"></script>
     <script>
         document.addEventListener('DOMContentLoaded', () => {
-            const toggle = document.getElementById('theme-toggle');
-            if (toggle && window.ThemeLoader) toggle.addEventListener('click', () => window.ThemeLoader.toggleTheme());
+            // Theme Toggle Logic
+            const themeBtn = document.getElementById('theme-toggle');
+            if (themeBtn && window.ThemeLoader) {
+                themeBtn.addEventListener('click', () => window.ThemeLoader.toggleTheme());
+            }
 
+            // Mobile Menu Logic
             const menuBtn = document.querySelector('.doc-menu-toggle');
             const nav = document.querySelector('.doc-nav');
+
             if (menuBtn && nav) {
                 menuBtn.addEventListener('click', () => {
                     const isExpanded = menuBtn.getAttribute('aria-expanded') === 'true';

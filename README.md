@@ -2,7 +2,7 @@
 
 ![License: AGPL v3](https://img.shields.io/badge/License-AGPL_v3-blue.svg) ![Status: Active](https://img.shields.io/badge/status-active-success.svg) ![Tech: VanillaJS](https://img.shields.io/badge/tech-Vanilla_JS-yellow.svg) ![Tech: WebAssembly](https://img.shields.io/badge/tech-WebAssembly-blueviolet.svg) ![Accessibility: WCAG 2.1 AA Partial](https://img.shields.io/badge/accessibility-WCAG_2.1_AA_partial-yellow.svg)
 
-EasyTrace5000 is a browser-based CAM workspace that converts standard fabrication files (Gerber, Excellon, SVG) into G-code for CNC milling. It runs entirely client-side on any browser, removing the need for software installation or cloud processing. The pipeline includes custom arc-reconstruction to generate G2/G3 commands from the original geometry preventing the machine stuttering inherent to segmented toolpaths.
+EasyTrace5000 is a browser-based CAM workspace that converts standard fabrication files (Gerber, Excellon, SVG) into G-code for CNC milling and precision SVG/PNG files for Laser processing. It runs entirely client-side on any browser, removing the need for software installation or cloud processing.
 
 <div align="center">
   <img src="./images/EasyTrace5000_workspace.webp" width="830" height="467" alt="EasyTrace5000 Workspace screenshot">
@@ -43,7 +43,7 @@ Note: Jury's still out on UV lasers but until proven otherwise, use them with th
    * **Copper Clearing:** Internal pocketing for large copper areas.
    * **Board Cutouts:** Path generation with optional tab placement.
 
-* **1. Advanced Geometry Engine**
+* **Advanced Geometry Engine**
    The first stage converts source files into offset *geometry*.
    * **Analytic Parsing:** Reads Gerber, Excellon and full SVG paths (including arcs and Béziers) and converts to geometry objects.
    * **Board Rotation/Mirroring:** Support for project rotation and horizontal/vertical mirroring. (No per object manipulation, yet)
@@ -52,10 +52,10 @@ Note: Jury's still out on UV lasers but until proven otherwise, use them with th
    * **Unified Offset Pipeline:** A single pipeline handles both external (isolation) and internal (clearing) multi-pass offsets.
    * **Smart Drill Strategy:** Analyzes drill hole/slot size against tool diameter and generates the required operational object.
 
-* **2. Intelligent Toolpath Pipeline**
-   The final export stage converts geometry into optimized machine motion.
+* **Optimized Toolpath Pipeline**
+   The final export stage converts geometry into smooth and efficient machine motion.
    * **Geometry Translation:** Translates geometry objects and their metadata into organized toolpath plans with proper entry/exit points.
-   * **Toolpath Optimization:** Optionally restructures the toolpath plan to maximize efficiency:
+   * **Toolpath Optimization:** Optionally restructures the toolpath plan to remove unnecessary movement:
       * **Staydown Clustering:** Geometrically analyzes paths and groups nearby cuts to minimize Z-axis retractions.
       * **Path Ordering:** Applies a nearest-neighbor algorithm to sort clusters and reduce rapid travel time.
       * **Segment Simplification:** Removes collinear points with angle-aware tolerance.
@@ -65,7 +65,13 @@ Note: Jury's still out on UV lasers but until proven otherwise, use them with th
       * Manages complex hole/slot entries (helix or plunge).
       * Handles Z-lifts for board tabs during cutout operations.
 
-* **3. Multi-Stage Canvas Renderer**
+* **Laser Pipeline (Beta)**
+   A dedicated export pipeline tailored for UV and fiber, currently open for testing.
+   * **Smart Clearances:** Automatically generates isolation halos around conductive geometry that can then be cleared with a few different strategies.
+   * **Clearing Strategies:** Choose between concentric offsets, solid filled regions, or highly optimized hatch generation (with adjustable orientation and passes).
+   * **Precision Export:** Exports to high-DPI raster PNGs or true vector SVGs with enforced color coded hairline strokes and layers, ready for software like LightBurn or EZCAD.
+  
+* **Multi-Stage Canvas Renderer**
    * **Render optimization:** Provides smooth panning and zooming with batching, level of detail and viewport culling.
    * **Multi-Stage Visualization:** Clearly and distinctly renders **Source** (Gerber/SVG), **Offset** (generated paths), and **Preview** (tool-reach simulation) layers. Plus optional Debug features.
    * **Smart Drill Rendering:** Visually distinguishes source drill holes/slots, offset-stage peck marks, and final preview simulations with color-coded warnings for tool relation (exact/undersized/oversized).
@@ -102,37 +108,42 @@ Note 2: The parser understands all SVG data including complex Bézier curves and
 4. **Generate Offsets:** Set X&Y axis parameters: passes, stepover and click "Generate Offsets"
 5. **Preview Toolpath:** Define Z axis parameters: cut depth, multi-pass, entry-type and click "Generate Preview"
 6. **Export G-code:** Open Operations Manager, arrange sequence, confirm gcode parameters, preview & export
+* **Laser:** Skips the Preview stage, review generated laser geometry and open the Export Manager to download your SVG or PNG.
 
 ## The Workflow
 
-The application guides the user through a clear, non-destructive process. Each stage builds on the last, and its visibility can be toggled in the renderer.
+The application guides the user through a clear, non-destructive process. Each stage builds on the last, and its visibility can be toggled in the renderer. 
 
-### Stage 1: Source (Load Geometry)
-* **Action:** Add Gerber, Excellon or SVG files to the respective operation.
-* **Result:** The original source geometry is parsed, analyzed and displayed in the renderer.
-* **You See:** The original trace paths, pads, regions, drill holes and slots.
+### Shared Preparation
+* **Stage 1: Source (Load Geometry)**
+  * **Action:** Add Gerber, Excellon or SVG files to the respective operation.
+  * **Result:** The original source geometry is parsed, analyzed and displayed in the renderer.
+* **Stage 2: Board Placement & Machine Settings**
+  * **Action:** Double-check the origin, rotation/mirroring and base machine parameters.
+  * **Result:** Sets the origin, transforms geometry and all machine settings that will affect all your output files.
 
-### Stage 1.5: Board Placement and Machine settings
-* **Action:** Double check origin, rotation/mirroring and base Machine parameters.
-* **Result:** Sets origin, transforms geometry and all machine settings that will affect toolpaths.
-* **You See:** Origin/rulers will adapt if origin is moved and board geometry will re-align if rotated or mirrored.
+---
 
-### Stage 2: Offset (Generate Geometry)
-* **Action:** Configure parameters (tool, depth, stepover) and click **"Generate Offsets"**.
-* **Result:** The core triggers the **Geometry Engine**.
-   * For **Milling** operations, this creates new `offset` primitives using virtually lossless pipelines.
-   * For **Drilling** operations, this runs the drill strategy logic, creating Peck, Drill Milling, or Centerline primitives based on tool/hole size comparison.
-* **You See:** New objects appear in the tree ("Pass 1", "Peck Marks", "Milling Paths") and are rendered as thin red outlines. Drill markings are color-coded: green (exact fit), yellow (undersized tool), red (oversized tool).
+### The CNC Workflow
+* **Stage 3: Offset (Generate Geometry)**
+  * **Action:** Configure X/Y parameters (tool diameter, passes, stepover) and click **"Generate Offsets"**.
+  * **Result:** Generates new analytic boundaries for milling, or calculates smart peck/mill strategies for drilling.
+* **Stage 4: Preview (Simulate Tool Reach)**
+  * **Action:** Configure Z parameters (feed rate, plunge rate, cut depth) and click **"Generate Preview"**.
+  * **Result:** Creates a visual simulation stroked with the tool's diameter, showing exactly what material will be removed.
+* **Stage 5: G-code Export**
+  * **Action:** Open the Operations Manager, check the operation order, and click **"Calculate Toolpaths"**.
+  * **Result:** Translates the geometry into optimized machine motion and exports your final G-code file.
 
-### Stage 3: Preview (Simulate Tool Reach)
-* **Action:** Configure parameters (feed rate, plunge rate, spindle rpms) and click **Generate Preview**.
-* **Result:** This is a lightweight, *visual-aid* step. It creates `preview` primitives using the `offset` objects but stroked with the tool's diameter.
-* **You See:** New objects in the tree that render as simulated toolpaths the width of the tool, showing you what material will be removed. (Automatically hides offset geometry objects)
+---
 
-### Stage 4: Gcode Export
-* **Action:** Click **Operations & G-Code**, check operation order and export options. Click Calculate Toolpaths and then either copy g-code from the text box or Export as a file.
-* **Result:** Calculating Toolpaths translates the geometry objects into toolpath plan objects, optionally optimizes them and converts them to final machine ready code.
-* **You See:** G-Code Preview text box will become populated by the g-code and clicking **Export G-Code** will create a file for the browser to save/download.
+### The Laser Workflow (Beta)
+* **Stage 3: Laser Path Generation**
+  * **Action:** Configure laser parameters (spot size, clear strategy, hatch angle, isolation width) and click **"Generate Laser Paths"**.
+  * **Result:** Generates precise 2D geometry—such as concentric offsets, solid fills, or directional hatch patterns.
+* **Stage 4: Image Export**
+  * **Action:** Open the Export Manager, arrange the operation sequence, assign layer colors, and click **"Export"**.
+  * **Result:** Fuses colinear hatch segments to optimize laser travel time and exports your paths into precision vector (`.svg`) or high-resolution raster (`.png`) files.
 
 ---
 
@@ -335,11 +346,13 @@ window.getReconstructionRegistry()      // Inspect arc metadata from curve regis
 ## Known Issues & Limitations
 
 **Current Limitations:**
+* **No Self-Intersection Detection:** Internal offsets can collapse on themselves and create unexpected toolpaths.
 * **Post-Processors:** Consider all non-grbl post-processors as experimental and to be used with caution until further notice.
+* **Laser Pipeline (Beta):** The laser toolpath generation and export features are in active testing. Please verify all exported SVG/PNG files in your laser control software before firing.
+* **Hybrid Pipeline Locked:** The ability to automatically mix CNC operations (like drilling) and Laser operations in a single workspace is currently locked while standalone laser operations are tested.
 * **Metric Units:** Millimeters only. System is technically unit agnostic but base 10. A unit conversion module is planned.
 * **Bézier Offsetting:** While Bézier curves from SVGs are parsed analytically, they are interpolated (converted to line segments) by the plotter. True analytic offsetting and booleans of Béziers is not yet supported.
 * **Tool Changes:** The application does not currently generate tool change commands (M6). Operations using different tools must be exported as separate G-code files.
-* **UI:** Small screen/mobile support is incomplete.
 
 **Known Bugs:**
 * **Offsetting of corners:** Depending on distance between an internal corner (concave) and external corner (convex) the analytic offsetting engine may cause artifacts between the external rounded joint's arc and the internal side path.
@@ -347,11 +360,9 @@ window.getReconstructionRegistry()      // Inspect arc metadata from curve regis
 ## Roadmap
 
 - Unit conversion system
-- Responsive design for smaller screens
 - Tool library import/export
 - Theme import/export
 - Multi-lingual UI
-- Laser compatible files (isolation, soldermasks, etc)
 - Automatic tool change (M6) support
 - Improved toolpath optimization
 - 3D G-code preview/simulation
@@ -449,4 +460,4 @@ While I'm not actively seeking major code contributions, please help me test it 
 
 ---
 
-**Status**: Active Development | **Version**: 1.0.6 | **Platform**: Client-side Web
+**Status**: Active Development | **Version**: 1.0.7 | **Platform**: Client-side Web

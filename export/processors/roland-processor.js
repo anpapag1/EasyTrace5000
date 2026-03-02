@@ -1,5 +1,5 @@
 /*!
- * @file        gcode/processors/roland-processor.js
+ * @file        export/processors/roland-processor.js
  * @description Roland RML-1 post-processing module
  * @author      Eltryus - Ricardo Marques
  * @copyright   2025-2026 Eltryus - Ricardo Marques

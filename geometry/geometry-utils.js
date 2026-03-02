@@ -962,10 +962,19 @@
             };
         },
 
+        rotatePoint(point, angleRad, origin = { x: 0, y: 0 }) {
+            const cos = Math.cos(angleRad);
+            const sin = Math.sin(angleRad);
+            const dx = point.x - origin.x;
+            const dy = point.y - origin.y;
+            return {
+                x: origin.x + (dx * cos - dy * sin),
+                y: origin.y + (dx * sin + dy * cos)
+            };
+        },
+
         /**
          * This is the central tessellation point for the GeometryProcessor.
-         * @param {RenderPrimitive} primitive - The analytic primitive.
-         * @returns {PathPrimitive} A PathPrimitive with tessellated points.
          */
         primitiveToPath(primitive, curveIds = []) {
             if (primitive.type === 'path' && !primitive.properties?.isStroke) {

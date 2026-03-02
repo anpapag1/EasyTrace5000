@@ -5,11 +5,16 @@ RewriteEngine On
 RewriteCond %{HTTPS} off
 RewriteRule ^(.*)$ https://cam.eltryus.design/$1 [R=301,L]
 
-# Redirect /cnc or /cnc.html to /doc/cnc
-RewriteRule ^cnc(\.html)?$ /doc/cnc [R=301,L]
+# Old app at root (explicit /app request) → new location
+RewriteRule ^app(\.html)?/?$ /easytrace5000/ [R=301,L]
 
-# Redirect /laser or /laser.html to /doc/laser
-RewriteRule ^laser(\.html)?$ /doc/laser [R=301,L]
+# Old /doc/* → /easytrace5000/doc/*
+RewriteRule ^doc/?$         /easytrace5000/doc/      [R=301,L]
+RewriteRule ^doc/(.+)$      /easytrace5000/doc/$1    [R=301,L]
+
+# Old root-level shortcuts
+RewriteRule ^cnc(\.html)?$           /easytrace5000/doc/cnc           [R=301,L]
+RewriteRule ^laser(\.html)?$         /easytrace5000/doc/laser         [R=301,L]
 
 # MIME types
 <IfModule mod_mime.c>

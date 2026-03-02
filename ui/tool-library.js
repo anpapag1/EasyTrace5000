@@ -47,7 +47,7 @@
 
             try {
                 // Load from external file (single source of truth)
-                const loaded = await this.loadFromFile('tools.json');
+                const loaded = await this.loadFromFile('../tools.json');
                 if (loaded) {
                     return true;
                 }

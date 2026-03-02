@@ -141,53 +141,53 @@
             // Verify metadata survival
             if (fusionOptions.enableArcReconstruction && debugConfig.enabled) {
             this.verifyMetadataPropagation(fused, 'After fusion');
-        }
-
-        // Reconstruct arcs if enabled, otherwise use the fused geometry directly.
-        let finalGeometry; // Initialize as undefined.
-
-        this.debug('About to check if (fusionOptions.enableArcReconstruction).');
-        if (fusionOptions.enableArcReconstruction) {
-            this.debug(`=== RECONSTRUCTION PHASE ===`);
-            this.debug('Received options:', options);
-
-            const preReconstructionCount = fused.length;
-
-            // The reconstructor is now the single source of truth for the final geometry.
-            finalGeometry = this.arcReconstructor.processForReconstruction(fused);
-
-            const stats = this.arcReconstructor.getStats();
-            this.stats.curvesReconstructed = stats.reconstructed;
-
-            this.debug(`Reconstruction complete:`);
-            this.debug(`  Primitives: ${preReconstructionCount} → ${finalGeometry.length}`);
-            this.debug(`  Full circles reconstructed: ${stats.fullCircles}`);
-            this.debug(`  Partial arcs found: ${stats.partialArcs}`);
-            this.debug(`  Groups with gaps merged: ${stats.wrappedGroups}`);
-
-            if (debugConfig.enabled) {
-                this.verifyReconstructionResults(finalGeometry);
             }
-            this.debug('Exiting arc reconstruction block. Result count:', finalGeometry.length);
 
-        } else {
-            // If reconstruction is disabled, the fused geometry is the final geometry.
-            this.debug('Arc reconstruction is Disabled, skipping block.');
-            finalGeometry = fused;
+            // Reconstruct arcs if enabled, otherwise use the fused geometry directly.
+            let finalGeometry; // Initialize as undefined.
+
+            this.debug('About to check if (fusionOptions.enableArcReconstruction).');
+            if (fusionOptions.enableArcReconstruction) {
+                this.debug(`=== RECONSTRUCTION PHASE ===`);
+                this.debug('Received options:', options);
+
+                const preReconstructionCount = fused.length;
+
+                // The reconstructor is now the single source of truth for the final geometry.
+                finalGeometry = this.arcReconstructor.processForReconstruction(fused);
+
+                const stats = this.arcReconstructor.getStats();
+                this.stats.curvesReconstructed = stats.reconstructed;
+
+                this.debug(`Reconstruction complete:`);
+                this.debug(`  Primitives: ${preReconstructionCount} → ${finalGeometry.length}`);
+                this.debug(`  Full circles reconstructed: ${stats.fullCircles}`);
+                this.debug(`  Partial arcs found: ${stats.partialArcs}`);
+                this.debug(`  Groups with gaps merged: ${stats.wrappedGroups}`);
+
+                if (debugConfig.enabled) {
+                    this.verifyReconstructionResults(finalGeometry);
+                }
+                this.debug('Exiting arc reconstruction block. Result count:', finalGeometry.length);
+
+            } else {
+                // If reconstruction is disabled, the fused geometry is the final geometry.
+                this.debug('Arc reconstruction is Disabled, skipping block.');
+                finalGeometry = fused;
+            }
+
+            this.cachedStates.fusedGeometry = finalGeometry;
+
+            // Update statistics
+            this.stats.fusionOperations++;
+            this.stats.primitivesProcessed += primitives.length;
+            this.stats.primitivesReduced = primitives.length - finalGeometry.length;
+
+            this.debug(`=== FUSION PIPELINE COMPLETE ===`);
+            this.debug(`Result: ${primitives.length} → ${finalGeometry.length} primitives`);
+
+            return finalGeometry;
         }
-
-        this.cachedStates.fusedGeometry = finalGeometry;
-
-        // Update statistics
-        this.stats.fusionOperations++;
-        this.stats.primitivesProcessed += primitives.length;
-        this.stats.primitivesReduced = primitives.length - finalGeometry.length;
-
-        this.debug(`=== FUSION PIPELINE COMPLETE ===`);
-        this.debug(`Result: ${primitives.length} → ${finalGeometry.length} primitives`);
-
-        return finalGeometry;
-    }
 
         // Union geometry for offset pass merging
         async unionGeometry(primitives, options = {}) {
@@ -232,16 +232,18 @@
                 // Ensure proper primitive structure
                 return result.map(p => {
                     if (typeof PathPrimitive !== 'undefined' && !(p instanceof PathPrimitive)) {
-                        const contour = {
-                            points: result.points,
-                            isHole: false,
-                            nestingLevel: 0,
-                            parentId: null,
-                            arcSegments: result.arcSegments,
-                            curveIds: result.curveIds
-                        };
+                        const contours = (p.contours && p.contours.length > 0)
+                            ? p.contours
+                            : [{
+                                points: p.points || [],
+                                isHole: false,
+                                nestingLevel: 0,
+                                parentId: null,
+                                arcSegments: p.arcSegments || [],
+                                curveIds: p.curveIds || []
+                            }];
 
-                        return this._createPathPrimitive([contour], {
+                        return this._createPathPrimitive(contours, {
                             ...p.properties,
                             hasReconstructableCurves: p.hasReconstructableCurves
                         });
@@ -279,19 +281,19 @@
                 // Ensure proper primitive structure
                 return result.map(p => {
                     if (typeof PathPrimitive !== 'undefined' && !(p instanceof PathPrimitive)) {
-                        const contour = {
-                            points: result.points,
-                            isHole: false,
-                            nestingLevel: 0,
-                            parentId: null,
-                            arcSegments: result.arcSegments,
-                            curveIds: result.curveIds
-                        };
+                        const contours = (p.contours && p.contours.length > 0)
+                            ? p.contours
+                            : [{
+                                points: p.points || [],
+                                isHole: false,
+                                nestingLevel: 0,
+                                parentId: null,
+                                arcSegments: p.arcSegments || [],
+                                curveIds: p.curveIds || []
+                            }];
 
-                        return this._createPathPrimitive([contour], {
+                        return this._createPathPrimitive(contours, {
                             ...p.properties,
-                            contours: p.contours || [],
-                            curveIds: p.curveIds,
                             hasReconstructableCurves: p.hasReconstructableCurves
                         });
                     }
@@ -413,13 +415,11 @@
 
             // Strokes need conversion to filled polygons regardless of primitive type
             if (isStroke && props.strokeWidth > 0) {
-                if (typeof GeometryUtils !== 'undefined' && GeometryUtils.primitiveToPath) {
-                    const converted = GeometryUtils.primitiveToPath(primitive, curveIds || []);
-                    if (converted) {
-                        return converted;
-                    }
-                    // Fall through if conversion fails
+                const converted = GeometryUtils.primitiveToPath(primitive, curveIds || []);
+                if (converted) {
+                    return converted;
                 }
+                // Fall through if conversion fails
             }
 
             // If it's already a path, validate it has contours
@@ -434,28 +434,23 @@
             const localCurveIds = curveIds || [];
 
             // For analytic primitives, convert to path
-            if (typeof GeometryUtils !== 'undefined' && GeometryUtils.primitiveToPath) {
-                const pathPrimitive = GeometryUtils.primitiveToPath(primitive, localCurveIds);
+            const pathPrimitive = GeometryUtils.primitiveToPath(primitive, localCurveIds);
 
-                if (pathPrimitive) {
-                    // Verify contours were created
-                    if (!pathPrimitive.contours || pathPrimitive.contours.length === 0) {
-                        console.error(`[GeometryProcessor] primitiveToPath failed to create contours for ${primitive.type} (ID: ${primitive.id})`);
-                        return null;
-                    }
-                    
-                    if (localCurveIds.length > 0) {
-                        pathPrimitive.curveIds = localCurveIds;
-                    }
-                    return pathPrimitive;
-                } else {
-                    console.error(`[GeometryProcessor] Tessellation failed for ${primitive.type} (ID: ${primitive.id})`);
+            if (pathPrimitive) {
+                // Verify contours were created
+                if (!pathPrimitive.contours || pathPrimitive.contours.length === 0) {
+                    console.error(`[GeometryProcessor] primitiveToPath failed to create contours for ${primitive.type} (ID: ${primitive.id})`);
                     return null;
                 }
+                
+                if (localCurveIds.length > 0) {
+                    pathPrimitive.curveIds = localCurveIds;
+                }
+                return pathPrimitive;
+            } else {
+                console.error(`[GeometryProcessor] Tessellation failed for ${primitive.type} (ID: ${primitive.id})`);
+                return null;
             }
-
-            console.error(`[GeometryProcessor] GeometryUtils.primitiveToPath is missing.`);
-            return null;
         }
 
         // Perform boolean fusion
@@ -499,58 +494,57 @@
             this.debug(`Received ${primitives.length} total primitives. Separated into: ${darkPrimitives.length} dark (subjects) and ${clearPrimitives.length} clear (clips).`);
             this.debug(`_performFusion Input (Post-Standardization): ${darkPrimitives.length} dark, ${clearPrimitives.length} clear`);
 
-            // 2. Enforce Winding Order *before* Clipper
-            if (typeof GeometryUtils !== 'undefined' && GeometryUtils.isClockwise) {
-                let darkReversed = 0;
-                let clearReversed = 0;
-                darkPrimitives.forEach(prim => { // Ensure dark are CCW
-                    if (prim.contours && prim.contours[0] && GeometryUtils.isClockwise(prim.contours[0].points)) {
-                        prim.contours[0].points.reverse(); darkReversed++;
-                    }
+            // Enforce Winding Order *before* Clipper
+            // Outer contours → CCW, hole contours → CW, regardless of dark/clear polarity.
+            // ClipperWrapper also enforces this, but doing it here catches winding issues early.
+            let reversed = 0;
+            const enforceContourWinding = (primitives) => {
+                primitives.forEach(prim => {
+                    if (!prim.contours) return;
+                    prim.contours.forEach(contour => {
+                        if (!contour.points || contour.points.length < 3) return;
+                        const isCW = GeometryUtils.isClockwise(contour.points);
+                        const shouldBeCW = contour.isHole === true;
+                        if (isCW !== shouldBeCW) {
+                            contour.points.reverse();
+                            reversed++;
+                        }
+                    });
                 });
-                clearPrimitives.forEach(prim => { // Ensure clear are CW
-                    if (prim.contours && prim.contours[0] && !GeometryUtils.isClockwise(prim.contours[0].points)) {
-                        prim.contours[0].points.reverse(); clearReversed++;
-                    }
-                });
-                 this.debug(`Pre-Clipper Winding: Reversed ${darkReversed} dark, ${clearReversed} clear.`);
-            } else {
-                 console.warn('[GeometryProcessor] Cannot enforce pre-Clipper winding: GeometryUtils missing or isClockwise not found.');
-            }
+            };
+            enforceContourWinding(darkPrimitives);
+            enforceContourWinding(clearPrimitives);
+            this.debug(`Pre-Clipper Winding: Reversed ${reversed} contour(s).`);
 
-            // 3. Perform Boolean Operation
+            // Perform Boolean Operation
             const rawResult = await this.clipper.difference(darkPrimitives, clearPrimitives);
             this.debug('Raw Clipper Result Count:', rawResult.length);
 
             const directHolesCount = rawResult.filter(p => p && p.contours && p.contours.filter(c => c.isHole).length > 0).length;
             this.debug('Primitives with structured hole contours in raw result:', directHolesCount);
 
-            // 4. Normalize Winding on Clipper Result
-            if (typeof GeometryUtils !== 'undefined' && GeometryUtils.isClockwise) {
-                this.debug(`Normalizing winding for ${rawResult.length} final primitives.`);
-                rawResult.forEach((primitive, index) => {
-                    // Mark as fused. The wrapper already applied properties.
-                    if (primitive.properties) {
-                        primitive.properties.isFused = true;
-                    } else {
-                        primitive.properties = { isFused: true };
-                    }
+            // Normalize Winding on Clipper Result
+            this.debug(`Normalizing winding for ${rawResult.length} final primitives.`);
+            rawResult.forEach((primitive, index) => {
+                // Mark as fused. The wrapper already applied properties.
+                if (primitive.properties) {
+                    primitive.properties.isFused = true;
+                } else {
+                    primitive.properties = { isFused: true };
+                }
 
-                    if (primitive.type === 'path' && primitive.contours && primitive.contours.length > 0) {
-                        primitive.contours.forEach((contour, contourIdx) => {
-                            const pathIsClockwise = GeometryUtils.isClockwise(contour.points);
-                            const expectedClockwise = contour.isHole; // Holes should be CW
+                if (primitive.type === 'path' && primitive.contours && primitive.contours.length > 0) {
+                    primitive.contours.forEach((contour, contourIdx) => {
+                        const pathIsClockwise = GeometryUtils.isClockwise(contour.points);
+                        const expectedClockwise = contour.isHole; // Holes should be CW
 
-                            if (pathIsClockwise !== expectedClockwise) {
-                                this.debug(`  - Reversing contour ${index}:${contourIdx} (isHole=${contour.isHole}). Was ${pathIsClockwise ? 'CW' : 'CCW'}, expected ${expectedClockwise ? 'CW' : 'CCW'}.`);
-                                contour.points.reverse();
-                            }
-                        });
-                    }
-                });
-            } else {
-                 console.warn('[GeometryProcessor] Cannot normalize post-Clipper winding: GeometryUtils missing or isClockwise function not found.');
-            }
+                        if (pathIsClockwise !== expectedClockwise) {
+                            this.debug(`  - Reversing contour ${index}:${contourIdx} (isHole=${contour.isHole}). Was ${pathIsClockwise ? 'CW' : 'CCW'}, expected ${expectedClockwise ? 'CW' : 'CCW'}.`);
+                            contour.points.reverse();
+                        }
+                    });
+                }
+            });
 
             // The raw result IS the final result.
             const finalPrimitives = rawResult;

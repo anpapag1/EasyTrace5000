@@ -258,12 +258,18 @@
             geometriesContainer.innerHTML = '';
             fileData.geometries.clear();
 
+            const isLaser = window.pcbcam?.isLaserPipeline?.() || false;
+
             // Add offset nodes
             if (operation.offsets && operation.offsets.length > 0) {
+                const strategy = operation.offsets?.[0]?.metadata?.strategy
+                    || operation.settings?.laserClearStrategy
+                    || 'offset';
+
                 if (operation.offsets[0]?.combined) {
                     const passes = operation.offsets[0].passes || operation.offsets.length;
-                    const label = `Offsets`;
-                    this.addGeometryNode(fileId, 'offsets_combined', label, 
+                    const label = isLaser ? 'Laser Paths' : 'Offsets';
+                    this.addGeometryNode(fileId, 'offsets_combined', label,
                         operation.offsets[0].primitives?.length || 0, {
                         offset: operation.offsets[0].distance.toFixed(2),
                         combined: true,
@@ -271,7 +277,18 @@
                     });
                 } else {
                     operation.offsets.forEach((offset, index) => {
-                        const label = `Pass ${index + 1}`;
+                        let label;
+                        if (isLaser) {
+                            if (strategy === 'filled') {
+                                label = 'Filled Region';
+                            } else if (strategy === 'hatch') {
+                                label = `Hatch ${index + 1}`;
+                            } else {
+                                label = `Laser Pass ${index + 1}`;
+                            }
+                        } else {
+                            label = `Pass ${index + 1}`;
+                        }
                         const count = offset.primitives?.length || 0;
                         this.addGeometryNode(fileId, `offset_${index}`, label, count, {
                             offset: offset.distance.toFixed(2)
@@ -280,8 +297,9 @@
                 }
             }
 
-            // Add preview node if exists
-            if (operation.preview && operation.preview.primitives) {
+            // Preview node — CNC only. In laser mode, offsets are the exportable result.
+            // The preview.ready flag still exists internally for Export Manager compatibility.
+            if (!isLaser && operation.preview && operation.preview.primitives) {
                 this.addGeometryNode(fileId, 'preview', 'Preview',
                     operation.preview.primitives.length, {
                     generated: true,
@@ -353,6 +371,19 @@
             labelEl.textContent = label;
 
             if (extraData.offset) {
+                infoEl.textContent = `${extraData.offset}mm`;
+            } else {
+                infoEl.textContent = count > 0 ? `${count}` : '';
+            }
+
+            // Apply invalidated styling if the operation is flagged
+            if (fileData.operation.isInvalidated && (geometryType.startsWith('offset') || geometryType === 'offsets_combined')) {
+                nodeElement.classList.add('is-invalidated');
+                labelEl.style.textDecoration = 'line-through';
+                labelEl.style.color = 'var(--color-error, #ff4444)';
+                infoEl.textContent = 'Invalid';
+                infoEl.style.color = 'var(--color-error, #ff4444)';
+            } else if (extraData.offset) {
                 infoEl.textContent = `${extraData.offset}mm`;
             } else {
                 infoEl.textContent = count > 0 ? `${count}` : '';
@@ -488,15 +519,25 @@
 
             this.selectedNode = { type: 'geometry', id: geometryId, operation, geometryType };
 
-            // Determine geometry stage
-            let stage = 'geometry';
-            if (geometryType === 'preview') {
-                stage = 'machine';
-            } else if (geometryType.startsWith('offset') || geometryType === 'offsets_combined') {
-                stage = 'strategy';
+            // Determine stage (pipeline-aware)
+            const isLaser = window.pcbcam?.isLaserPipeline?.() || false;
+
+            let stage;
+            if (isLaser) {
+                // Laser: generated geometry nodes exist only after generation succeeded.
+                // They are the exportable result — always show export summary.
+                stage = 'export_summary';
+            } else {
+                // CNC: 3-stage mapping
+                if (geometryType === 'preview') {
+                    stage = 'machine';
+                } else if (geometryType.startsWith('offset') || geometryType === 'offsets_combined') {
+                    stage = 'strategy';
+                } else {
+                    stage = 'geometry';
+                }
             }
 
-            // Announce the selection to cam-ui.js
             if (this.ui.handleOperationSelection) {
                 this.ui.handleOperationSelection(operation, stage);
             }
@@ -1090,6 +1131,18 @@
                 .forEach(el => el.classList.remove('onboarding-highlight'));
 
             this.debug('Onboarding suggestion dismissed');
+        }
+
+        /**
+         * Finds the file node data for a given operation ID.
+         */
+        getNodeByOperationId(operationId) {
+            for (const [, node] of this.nodes) {
+                if (node.operation?.id === operationId) {
+                    return node;
+                }
+            }
+            return null;
         }
 
         debug(message, data = null) {

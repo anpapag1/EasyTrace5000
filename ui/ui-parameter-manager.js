@@ -53,6 +53,11 @@
 
         initializeDefinitions() {
             return {
+
+                // ═══════════════════════════════════════
+                // CNC PIPELINE PARAMETERS
+                // ═══════════════════════════════════════
+
                 // 1: Geometry
                 tool: {
                     type: 'select',
@@ -261,6 +266,132 @@
                     ...validationRules.spindleDwell,
                     stage: 'machine',
                     category: 'feeds'
+                },
+
+                // ═══════════════════════════════════════
+                // LASER PIPELINE PARAMETERS
+                // ═══════════════════════════════════════
+
+                // Laser Geometry Stage — Tool
+                laserSpotSize: {
+                    type: 'number',
+                    label: 'Laser Spot Size',
+                    unit: 'mm',
+                    step: 0.01,
+                    min: 0.01,
+                    max: 1.0,
+                    default: 0.05,
+                    stage: 'geometry',
+                    category: 'laser_tool',
+                    pipelineType: 'laser',
+                    readOnly: true
+                },
+
+                // Laser Geometry Stage — Isolation
+                laserIsolationWidth: {
+                    type: 'number',
+                    label: 'Isolation Width',
+                    unit: 'mm',
+                    step: 0.01,
+                    min: 0.01,
+                    max: 5.0,
+                    default: 0.3,
+                    stage: 'geometry',
+                    category: 'laser_geometry',
+                    pipelineType: 'laser',
+                    operationType: 'isolation'
+                },
+
+                // Laser Geometry Stage — Clearing Padding
+                // NOTE: Dormant — reserved for future "fill-to-cutout" board-fill feature.
+                // Currently hidden from all operation types.
+                laserClearingPadding: {
+                    type: 'number',
+                    label: 'Clearing Padding',
+                    unit: 'mm',
+                    step: 0.1,
+                    min: 0,
+                    max: 10.0,
+                    default: 1.0,
+                    stage: 'geometry',
+                    category: 'laser_geometry',
+                    pipelineType: 'laser',
+                    operationType: '_board_fill'
+                },
+
+                // Laser Geometry Stage — Step Over (all non-cutout ops)
+                laserStepOver: {
+                    type: 'number',
+                    label: 'Step Over',
+                    unit: '%',
+                    step: 5,
+                    min: 10,
+                    max: 95,
+                    default: 50,
+                    stage: 'geometry',
+                    category: 'laser_strategy',
+                    pipelineType: 'laser',
+                    operationTypes: ['isolation', 'clearing'],
+                    conditional: 'laserClearStrategy:offset,hatch'
+                },
+
+                // Laser Geometry Stage — Clearing Strategy
+                laserClearStrategy: {
+                    type: 'select',
+                    label: 'Clearing Strategy',
+                    options: [
+                        { value: 'offset', label: 'Offset Paths — Concentric, streak-proof' },
+                        { value: 'filled', label: 'Filled Polygon — Laser software controls fill' },
+                        { value: 'hatch', label: 'Hatch Fill — Directional line coverage' }
+                    ],
+                    default: 'offset',
+                    stage: 'geometry',
+                    category: 'laser_strategy',
+                    pipelineType: 'laser',
+                    operationTypes: ['isolation', 'clearing']
+                },
+
+                // Laser Geometry Stage — Hatch Passes (number of angular passes)
+                laserHatchPasses: {
+                    type: 'number',
+                    label: 'Hatch Passes',
+                    step: 1,
+                    min: 1,
+                    max: 8,
+                    default: 2,
+                    stage: 'geometry',
+                    category: 'laser_strategy',
+                    pipelineType: 'laser',
+                    operationTypes: ['isolation', 'clearing'],
+                    conditional: 'laserClearStrategy:hatch'
+                },
+
+                // Laser Geometry Stage — Hatch Angle
+                laserHatchAngle: {
+                    type: 'number',
+                    label: 'Hatch Base Angle',
+                    unit: '°',
+                    step: 5,
+                    min: 0,
+                    max: 180,
+                    default: 45,
+                    stage: 'geometry',
+                    category: 'laser_strategy',
+                    pipelineType: 'laser',
+                    operationTypes: ['isolation', 'clearing'],
+                    conditional: 'laserClearStrategy:hatch'
+                },
+
+                // Laser Geometry Stage — Cutout
+                laserCutSide: {
+                    type: 'select',
+                    label: 'Cut Side',
+                    options: null, // Populated from config.ui.parameterOptions.laserCutSide
+                    default: 'outside',
+                    stage: 'geometry',
+                    category: 'laser_cutout',
+                    pipelineType: 'laser',
+                    operationTypes: ['cutout', 'drill']
                 }
             };
         }
@@ -507,28 +638,28 @@
 
                 let value;
 
-                // 1. Check for a value in the manager's current "live" state first.
-                //    Preserve unsaved changes if switching tabs and coming back.
+                // Check for a value in the manager's current "live" state first.
+                // Preserve unsaved changes if switching tabs and coming back.
                 value = state[def.stage][name];
 
-                // 2. If not in live state, check the operation's saved settings.
-                //    This is the "load" step. ONLY check for the flat property.
+                // If not in live state, check the operation's saved settings.
+                // This is the "load" step. ONLY check for the flat property.
                 if (value === undefined) {
                     value = opSettings[name];
                 }
 
-                // 3. If not in saved settings, check the config defaults for this OpType.
+                // If not in saved settings, check the config defaults for this OpType.
                 if (value === undefined) {
                     value = defaults[name];
                 }
 
-                // 4. If still not found, check the parameter's hardcoded default.
+                // If still not found, check the parameter's hardcoded default.
                 if (value === undefined) {
                     value = def.default;
                 }
 
-                // 5. If a value was found (from any source), set it in the manager.
-                //    This validates/clamps the value on load.
+                // If a value was found (from any source), set it in the manager.
+                // This validates/clamps the value on load.
                 if (value !== undefined) {
                     // Use setParameter to ensure the loaded value is valid
                     // Note: Uses the internal state-setting method to avoid marking the operation as "dirty" just from loading it.
@@ -543,6 +674,15 @@
                 }
             }
 
+            // Sync laser spot size from machine settings
+            const controller = window.pcbcam;
+            if (controller?.isLaserPipeline?.()) {
+                const machineSpotSize = controller.core?.settings?.laser?.spotSize;
+                if (machineSpotSize !== undefined && state.geometry) {
+                    state.geometry.laserSpotSize = machineSpotSize;
+                }
+            }
+
             // Clear dirty flag after a fresh load
             this.dirtyFlags.delete(operation.id);
         }
@@ -552,21 +692,70 @@
             return this.dirtyFlags.has(operationId);
         }
 
-        // Get parameters filtered by stage and operation type
-        getStageParameters(stage, operationType) {
+        // Get parameters filtered by stage, operation type, and pipeline.
+        getStageParameters(stage, operationType, pipelineType) {
             const params = [];
+            const isLaser = pipelineType === 'laser' || pipelineType === 'hybrid';
+
+            const exportFormat = window.pcbcam?.core?.settings?.laser?.exportFormat || 'svg';
 
             for (const [name, def] of Object.entries(this.parameterDefinitions)) {
-                // Check stage match
+                // Stage matching: 'export_summary' has no parameters — it's a display-only stage
+                if (stage === 'export_summary') continue;
                 if (def.stage !== stage) continue;
 
-                // Check operation type if specified
+                // Single operationType filter
                 if (def.operationType && def.operationType !== operationType) continue;
 
-                params.push({ name, ...def });
+                // Array operationTypes filter (must be one of listed types)
+                if (def.operationTypes && !def.operationTypes.includes(operationType)) continue;
+
+                // Pipeline filtering: laser params only in laser mode, CNC params only in CNC mode
+                if (def.pipelineType === 'laser' && !isLaser) continue;
+                if (!def.pipelineType && isLaser) continue;
+
+                // Hide clearing-related params if exporting to PNG
+                if (isLaser && exportFormat === 'png') {
+                    if (name === 'laserClearStrategy' || name === 'laserStepOver' || name === 'laserHatchAngle') {
+                        continue; 
+                    }
+                }
+
+                // Resolve dynamic options from config
+                const resolved = { name, ...def };
+                if (resolved.options === null) {
+                    const configOptions = config.ui?.parameterOptions?.[name];
+                    if (configOptions) {
+                        resolved.options = configOptions;
+                    }
+                }
+
+                params.push(resolved);
             }
 
             return params;
+        }
+
+        /**
+         * Returns the valid stages for a given pipeline type.
+         */
+        getStagesForPipeline(pipelineType) {
+            if (pipelineType === 'laser') {
+                return ['geometry', 'export_summary'];
+            }
+            // CNC and hybrid use the standard three stages
+            return ['geometry', 'strategy', 'machine'];
+        }
+
+        /**
+         * Returns the next stage in the pipeline after the given one.
+         * Returns null if the current stage is the last one.
+         */
+        getNextStage(currentStage, pipelineType) {
+            const stages = this.getStagesForPipeline(pipelineType);
+            const idx = stages.indexOf(currentStage);
+            if (idx === -1 || idx >= stages.length - 1) return null;
+            return stages[idx + 1];
         }
 
         // Validate all parameters for an operation
@@ -596,29 +785,22 @@
         // Get default values for operation type
         getDefaults(operationType) {
             const opConfig = config.operations?.[operationType];
-            if (!opConfig) return {};
+            const cuttingConfig = opConfig?.cutting;
+            const settingsConfig = opConfig?.defaultSettings;
+            const defaultToolId = opConfig?.defaultTool;
 
-            const cuttingConfig = opConfig.cutting;
-            const settingsConfig = opConfig.defaultSettings;
-            const defaultToolId = opConfig.defaultTool;
-
-            let toolDiameter; 
-
-            // Access the global controller to find the initialized library
+            let toolDiameter;
             if (defaultToolId && window.pcbcam?.ui?.toolLibrary) {
                 const libraryDiameter = window.pcbcam.ui.toolLibrary.getToolDiameter(defaultToolId);
-                // Ensure a valid number (0 is technically valid for logic, but invalid for tools, check for null/undefined)
                 if (libraryDiameter !== null && libraryDiameter !== undefined) {
                     toolDiameter = libraryDiameter;
                 }
             }
 
-            return {
-                // Tool
+            // CNC defaults
+            const defaults = {
                 tool: defaultToolId,
-                toolDiameter: toolDiameter, // Will be undefined if lookup fails
-
-                // Strategy
+                toolDiameter: toolDiameter,
                 multiDepth: settingsConfig?.multiDepth ?? true,
                 passes: settingsConfig?.passes ?? 1,
                 stepOver: settingsConfig?.stepOver ?? 50,
@@ -644,6 +826,23 @@
                 tabHeight: settingsConfig?.tabHeight ?? 0.5,
                 cutSide: settingsConfig?.cutSide ?? 'outside'
             };
+
+            // Laser defaults — merge from config + machine settings
+            const controller = window.pcbcam;
+            if (controller?.isLaserPipeline?.()) {
+                const laserMachine = controller.core?.settings?.laser || {};
+                const opLaserDefaults = config.laser.operationDefaults?.[operationType] || {};
+
+                defaults.laserSpotSize = laserMachine.spotSize;
+                defaults.laserIsolationWidth = opLaserDefaults.isolationWidth;
+                defaults.laserClearingPadding = opLaserDefaults.clearingPadding;
+                defaults.laserStepOver = opLaserDefaults.stepOver;
+                defaults.laserClearStrategy = opLaserDefaults.clearStrategy;
+                defaults.laserHatchAngle = opLaserDefaults.hatchAngle;
+                defaults.laserCutSide = opLaserDefaults.cutSide;
+            }
+
+            return defaults;
         }
 
         // Change notification

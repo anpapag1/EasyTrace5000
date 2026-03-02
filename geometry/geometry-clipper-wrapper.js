@@ -264,13 +264,30 @@
                 const input = new Paths64();
                 objects.push(input);
 
-                // Convert JS paths to Clipper paths
+                // Convert JS paths to Clipper paths — process ALL contours
                 paths.forEach(path => {
-                    const points = path.contours?.[0]?.points;
-                    const clipperPath = this._jsPathToClipper(points, path.clockwise);
-                    if (clipperPath) {
-                        input.push_back(clipperPath);
-                        objects.push(clipperPath);
+                    if (path.contours && path.contours.length > 0) {
+                        path.contours.forEach(contour => {
+                            const polarity = contour.isHole ? 'clear' : 'dark';
+                            const clipperPath = this._jsPathToClipper(contour.points, polarity);
+                            if (clipperPath) {
+                                input.push_back(clipperPath);
+                                objects.push(clipperPath);
+                            }
+                        });
+                    } else if (path.type !== 'path') {
+                        // Fallback: analytic primitive that wasn't pre-tessellated
+                        const pPath = GeometryUtils.primitiveToPath(path);
+                        if (pPath && pPath.contours) {
+                            pPath.contours.forEach(contour => {
+                                const polarity = contour.isHole ? 'clear' : 'dark';
+                                const clipperPath = this._jsPathToClipper(contour.points, polarity);
+                                if (clipperPath) {
+                                    input.push_back(clipperPath);
+                                    objects.push(clipperPath);
+                                }
+                            });
+                        }
                     }
                 });
 
@@ -307,31 +324,38 @@
                 const clips = new Paths64();
                 objects.push(subjects, clips);
 
-                // Add subject paths (ensure CCW for positive)
-                subjectPaths.forEach(path => {
-                    const points = path.contours?.[0]?.points;
-                    const clipperPath = this._jsPathToClipper(
-                        points,
-                        'dark'
-                    );
-                    if (clipperPath) {
-                        subjects.push_back(clipperPath);
-                        objects.push(clipperPath);
-                    }
-                });
+                // Shared helper: iterate all contours with correct per-contour polarity.
+                // Both subjects and clips need outer=CCW, hole=CW for NonZero fill to correctly evaluate winding (outer +1, hole -1, net=0 inside hole).
+                const addAllContours = (pathsArray, clipperPathsObj) => {
+                    pathsArray.forEach(path => {
+                        if (path.contours && path.contours.length > 0) {
+                            path.contours.forEach(contour => {
+                                const polarity = contour.isHole ? 'clear' : 'dark';
+                                const clipperPath = this._jsPathToClipper(contour.points, polarity);
+                                if (clipperPath) {
+                                    clipperPathsObj.push_back(clipperPath);
+                                    objects.push(clipperPath);
+                                }
+                            });
+                        } else if (path.type !== 'path') {
+                            // Fallback: analytic primitive that wasn't pre-tessellated
+                            const pPath = GeometryUtils.primitiveToPath(path);
+                            if (pPath && pPath.contours) {
+                                pPath.contours.forEach(contour => {
+                                    const polarity = contour.isHole ? 'clear' : 'dark';
+                                    const clipperPath = this._jsPathToClipper(contour.points, polarity);
+                                    if (clipperPath) {
+                                        clipperPathsObj.push_back(clipperPath);
+                                        objects.push(clipperPath);
+                                    }
+                                });
+                            }
+                        }
+                    });
+                };
 
-                // Add clip paths (ensure CW for negative)
-                clipPaths.forEach(path => {
-                    const points = path.contours?.[0]?.points;
-                    const clipperPath = this._jsPathToClipper(
-                        points,
-                        'clear'
-                    );
-                    if (clipperPath) {
-                        clips.push_back(clipperPath);
-                        objects.push(clipperPath);
-                    }
-                });
+                addAllContours(subjectPaths, subjects);
+                addAllContours(clipPaths, clips);
 
                 const clipper = new Clipper64();
                 const solution = new PolyPath64();
@@ -538,7 +562,9 @@
                     points: rootPoints,
                     nestingLevel: 0,
                     isHole: false,
-                    parentId: null
+                    parentId: null,
+                    arcSegments: [],
+                    curveIds: Array.from(curveIds)
                 });
 
                 // Extract all nested contours

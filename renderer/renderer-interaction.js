@@ -96,7 +96,7 @@
             if (e.button === 0) {
                 this.isDragging = true;
                 this.lastMousePos = { x: e.clientX, y: e.clientY }; // Store CSS pixels for delta
-                this.canvas.style.cursor = interactionConfig.cursorGrabbing || 'grabbing'; // Not in config? // irrelevant choice?
+                this.canvas.style.cursor = interactionConfig.cursorGrabbing;
             } else if (e.button === 2) {
                 this.isRightDragging = true;
                 this.lastMousePos = { x: e.clientX, y: e.clientY }; // Store CSS pixels for delta

@@ -175,17 +175,51 @@
 
                             const startPoint = group.points[0];
                             const endPoint = group.points[group.points.length - 1];
-                            newPoints.push(startPoint);
-                            newPoints.push(endPoint);
+
+                            // Dedup: don't push startPoint if it duplicates the last point already in newPoints
+                            if (newPoints.length > 0) {
+                                const last = newPoints[newPoints.length - 1];
+                                const dx = last.x - startPoint.x;
+                                const dy = last.y - startPoint.y;
+                                if ((dx * dx + dy * dy) > 1e-9) {
+                                    newPoints.push(startPoint);
+                                } 
+                                // else: skip duplicate, arc startIndex will point to existing last point
+                            } else {
+                                newPoints.push(startPoint);
+                            }
+
+                            const arcStartIdx = newPoints.length - 1;
+
+                            // Check if endPoint is essentially the same as startPoint (full circle)
+                            const startEndDx = startPoint.x - endPoint.x;
+                            const startEndDy = startPoint.y - endPoint.y;
+                            const isFullCircle = (startEndDx * startEndDx + startEndDy * startEndDy) < 1e-9;
+
+                            if (!isFullCircle) {
+                                newPoints.push(endPoint);
+                            }
+                            // For full circles, endIndex wraps to startIndex
+
+                            const arcEndIdx = isFullCircle ? arcStartIdx : (newPoints.length - 1);
+
+                            // Compute sweep including the closing segment when this group covers the entire contour (all points belong to one curve).
+                            // This prevents underestimation of full-circle sweeps.
+                            // REVIEW THIS LOGIC - IF ANY POINT IS MISSING THEN IT'S NOT A FULL CIRCLE - IT CAN ONLY BE A FULL CIRCLE IF ALL POINTS ARE PRESENT, EVEN IF NOT CLOSED PROPERLY
+                            let sweepAngle = arcFromPoints.sweepAngle;
+                            if (isFullCircle && Math.abs(sweepAngle) < (2 * Math.PI * 0.95)) {
+                                // The sweep was computed with isClosed=false, missing the closing segment. Recalculate with closing segment included.
+                                sweepAngle = this.calculateAngularSweep(group.points, curveData.center, true);
+                            }
 
                             detectedArcSegments.push({
-                                startIndex: newPoints.length - 2,
-                                endIndex: newPoints.length - 1,
+                                startIndex: arcStartIdx,
+                                endIndex: arcEndIdx,
                                 center: arcFromPoints.center,
                                 radius: arcFromPoints.radius,
                                 startAngle: arcFromPoints.startAngle,
                                 endAngle: arcFromPoints.endAngle,
-                                sweepAngle: arcFromPoints.sweepAngle,
+                                sweepAngle: sweepAngle,
                                 clockwise: arcFromPoints.clockwise,
                                 curveId: group.curveId
                             });
@@ -196,7 +230,21 @@
                         newPoints.push(...group.points);
                     }
                 } else {
-                    newPoints.push(...group.points);
+                    // For straight groups, dedup the first point against the last in newPoints
+                    const groupPts = group.points;
+                    let startIdx = 0;
+                    if (newPoints.length > 0 && groupPts.length > 0) {
+                        const last = newPoints[newPoints.length - 1];
+                        const first = groupPts[0];
+                        const dx = last.x - first.x;
+                        const dy = last.y - first.y;
+                        if ((dx * dx + dy * dy) <= 1e-9) {
+                            startIdx = 1; // skip duplicate
+                        }
+                    }
+                    for (let i = startIdx; i < groupPts.length; i++) {
+                        newPoints.push(groupPts[i]);
+                    }
                 }
             }
 
@@ -329,10 +377,6 @@
 
         /**
          * Calculates the total angular sweep of a set of points around a center.
-         * @param {Array<object>} points The points of the curve segment.
-         * @param {object} center The center of the original curve.
-         * @param {boolean} isClosed - Whether to include the sweep from the last point to the first.
-         * @returns {number} The total sweep angle in radians.
          */
         calculateAngularSweep(points, center, isClosed) {
             if (points.length < 2) return 0;

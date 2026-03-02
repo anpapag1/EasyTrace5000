@@ -99,6 +99,7 @@
     --color-geometry-preview: #0060dd;
     --color-geometry-toolpath: #00ffff;
     --color-geometry-selection: #00ffff;
+    --color-geometry-laser-filled: #0060dd;
 
     /* Primitives Colors */
     --color-primitive-offset-internal: #00aa00;

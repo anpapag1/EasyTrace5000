@@ -44,7 +44,7 @@
             this.controls = null;
             this.renderer = null;
             this.coordinateSystem = null;
-            this.svgExporter = null; 
+            this.canvasExporter = null; 
             this.stats = {
                 files: 0,
                 operations: 0,
@@ -135,8 +135,8 @@
                     });
                 }
 
-                if (typeof SVGExporter !== 'undefined') {
-                    this.svgExporter = new SVGExporter(this.renderer);
+                if (typeof CanvasExporter !== 'undefined') {
+                    this.canvasExporter = new CanvasExporter(this.renderer);
                 }
 
                 this.renderer.setOptions({
@@ -341,8 +341,13 @@
                                 `offset_${operation.id}_combined` :
                                 `offset_${operation.id}_pass_${passIndex + 1}`;
 
-                            // Check if this operation has a preview and if it does, the offsets should get hidden.
-                            const hasPreview = operation.preview && operation.preview.primitives && operation.preview.primitives.length > 0;
+                            // In laser mode, offsets are the visible result so don't hide them.
+                            // In CNC mode, offsets are hidden once a preview exists (preview supersedes).
+                            const isLaser = window.pcbcam?.isLaserPipeline?.() || false;
+                            const hasPreview = !isLaser && operation.preview && operation.preview.primitives && operation.preview.primitives.length > 0;
+
+                            // Detect hatch layers from metadata flag
+                            const isHatch = offset.metadata?.isHatch === true;
 
                             this.renderer.addLayer(
                                 layerName,
@@ -356,7 +361,8 @@
                                     pass: offset.pass,
                                     distance: offset.distance,
                                     combined: offset.combined || false,
-                                    metadata: offset.metadata
+                                    metadata: offset.metadata,
+                                    isHatch: isHatch
                                 }
                             );
                         }
@@ -443,14 +449,7 @@
                         this.updateStatus('Loaded ' + file.name + ': ' + operation.primitives.length + ' primitives', 'success');
 
                         if (this.navTreePanel) {
-                            const nodes = this.navTreePanel.nodes;
-                            let fileNode = null;
-                            nodes.forEach((node) => {
-                                if (node.operation && node.operation.id === operation.id) {
-                                    fileNode = node;
-                                }
-                            });
-
+                            const fileNode = this.navTreePanel.getNodeByOperationId(operation.id);
                             if (fileNode) {
                                 this.navTreePanel.updateFileGeometries(fileNode.id, operation);
                             }
@@ -474,14 +473,13 @@
             }
         }
 
-        async exportSVG() {
+        async exportCanvasSVG() {
             try {
-                // The SVGExporter will handle the download internally.
-                this.svgExporter.exportSVG(); 
-                this.updateStatus('SVG exported successfully', 'success');
+                this.canvasExporter.exportCanvasSVG(); 
+                this.updateStatus('Canvas exported successfully', 'success');
             } catch (error) {
-                console.error('SVG export error:', error);
-                this.updateStatus('SVG export failed: ' + error.message, 'error');
+                console.error('Canvas export error:', error);
+                this.updateStatus('Canvas export failed: ' + error.message, 'error');
             }
         }
 
@@ -575,6 +573,12 @@
                 this.statusManager.updateStatus(message, type);
             } else {
                 console.error("StatusManager not initialized, cannot show status!");
+            }
+        }
+
+        showStatus(message, type) {
+            if (this.statusManager) {
+                this.statusManager.showStatus(message, type);
             }
         }
 

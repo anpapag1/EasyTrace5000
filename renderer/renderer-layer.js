@@ -168,8 +168,12 @@
             for (const layer of orderedLayers) {
                 if (!layer.visible) continue;
 
-                // Dispatch to appropriate renderer based on layer type
-                if (layer.isOffset || layer.type === 'offset') {
+                // Dispatch to appropriate renderer based on layer type and flags
+                if (layer.isHatch) {
+                    this._renderHatchLayerBatched(layer);
+                } else if (layer.metadata?.strategy === 'filled') {
+                    this._renderFilledLayerImmediate(layer);
+                } else if (layer.isOffset || layer.type === 'offset') {
                     this._renderOffsetLayerImmediate(layer);
                 } else if (layer.isPreview || layer.type === 'preview') {
                     this._renderPreviewLayerImmediate(layer);
@@ -184,17 +188,26 @@
                 cutout: [], 
                 otherSource: [], 
                 drill: [],
-                fused: [], 
+                fused: [],
+                laserFill: [],
                 offset: [], 
                 preview: [] 
             };
 
             this.layers.forEach((layer) => {
                 if (!layer.visible) return;
+                const strategy = layer.metadata?.strategy;
+
                 switch (layer.type) {
                     case 'cutout':  buckets.cutout.push(layer); break;
                     case 'drill':   buckets.drill.push(layer); break;
-                    case 'offset':  buckets.offset.push(layer); break;
+                    case 'offset':
+                        if (layer.isHatch || strategy === 'filled') {
+                            buckets.laserFill.push(layer);
+                        } else {
+                            buckets.offset.push(layer);
+                        }
+                        break;
                     case 'preview': buckets.preview.push(layer); break;
                     case 'fused':   buckets.fused.push(layer); break;
                     default:        buckets.otherSource.push(layer); break;
@@ -215,6 +228,7 @@
                 ...buckets.otherSource,
                 ...buckets.drill,
                 ...buckets.fused,
+                ...buckets.laserFill,
                 ...buckets.offset,
                 ...buckets.preview
             ];
@@ -306,6 +320,166 @@
                 this.primitiveRenderer.renderPeckMark(prim, { layer });
                 this.core.renderStats.drawCalls++;
             }
+        }
+
+        // ========================================================================
+        // FILLED (Laser): Immediate Mode
+        // ========================================================================
+
+        _renderFilledLayerImmediate(layer) {
+            const viewBounds = this.core.frameCache.viewBounds;
+            const isRotated = this.core.currentRotation !== 0;
+
+            // Layer-level bounds check
+            const displayBounds = isRotated ? this._getRotatedLayerBounds(layer) : layer.bounds;
+            if (displayBounds && !this.core.boundsIntersect(displayBounds, viewBounds)) {
+                this.core.renderStats.primitives += layer.primitives.length;
+                this.core.renderStats.skippedPrimitives += layer.primitives.length;
+                return;
+            }
+
+            // Resolve colors from theme with fallback
+            const fillColor = this.core.colors.geometry?.laser?.filled || this.core.colors.geometry.preview;
+            const minWidth = this.core.frameCache.minWorldWidth;
+            const outlineWidth = Math.max(1.0 * this.core.frameCache.invScale, minWidth);
+
+            const entries = layer.renderCache?.entries || 
+                layer.primitives.map(p => ({ primitive: p, bounds: p.getBounds(), screenSize: 1 }));
+
+            for (const entry of entries) {
+                this.core.renderStats.primitives++;
+
+                // Viewport culling
+                if (!this.core.boundsIntersect(entry.bounds, viewBounds)) {
+                    this.core.renderStats.skippedPrimitives++;
+                    this.core.renderStats.culledViewport++;
+                    continue;
+                }
+
+                // LOD culling
+                if (!this.core.passesLODCull(entry.screenSize, this.core.viewScale, this.core.lodThreshold)) {
+                    this.core.renderStats.skippedPrimitives++;
+                    this.core.renderStats.culledLOD++;
+                    continue;
+                }
+
+                const prim = entry.primitive;
+                if (!this.core.shouldRenderPrimitive(prim, layer.type)) {
+                    this.core.renderStats.skippedPrimitives++;
+                    continue;
+                }
+
+                this.core.renderStats.renderedPrimitives++;
+
+                // Build the path once — _drawPrimitivePath calls beginPath() internally.
+                // Multi-contour paths with holes render correctly via evenodd fill rule since outer and hole contours have opposite winding from Clipper output.
+                this.primitiveRenderer._drawPrimitivePath(prim);
+
+                // Solid fill to show ablation zone
+                this.ctx.save();
+                this.ctx.fillStyle = fillColor;
+                this.ctx.fill('evenodd');
+                this.ctx.restore();
+
+                // Debug collection
+                if (this._shouldCollectDebug(prim)) {
+                    this.debugPrimitives.push(prim);
+                }
+
+                this.core.renderStats.drawCalls += 2;
+            }
+        }
+
+        // ========================================================================
+        // HATCH (Laser): Batched Immediate Mode
+        // ========================================================================
+
+        /**
+         * Renders laser hatch lines using a single batched draw call.
+         */
+        _renderHatchLayerBatched(layer) {
+            const viewBounds = this.core.frameCache.viewBounds;
+            const isRotated = this.core.currentRotation !== 0;
+
+            // Layer-level bounds check
+            const displayBounds = isRotated ? this._getRotatedLayerBounds(layer) : layer.bounds;
+            if (displayBounds && !this.core.boundsIntersect(displayBounds, viewBounds)) {
+                this.core.renderStats.primitives += layer.primitives.length;
+                this.core.renderStats.skippedPrimitives += layer.primitives.length;
+                return;
+            }
+
+            // REVIEW THIS LOGIC - IF THE HATCH PATTERN LINES ALL HAVE THE SAME SIZE THEY WILL NEVER, REALISTICALLY, GO SUB-PIXEL
+            // Layer-level LOD: if the entire hatch region is sub-pixel, skip it.
+            // Individual line LOD is pointless since all lines have the same size.
+            /*if (displayBounds) {
+                const layerScreenWidth = Math.max(
+                    displayBounds.maxX - displayBounds.minX,
+                    displayBounds.maxY - displayBounds.minY
+                ) * this.core.viewScale;
+                const dpr = this.core.devicePixelRatio || 1;
+                if (layerScreenWidth / dpr < this.core.lodThreshold) {
+                    this.core.renderStats.primitives += layer.primitives.length;
+                    this.core.renderStats.skippedPrimitives += layer.primitives.length;
+                    return;
+                }
+            }*/
+
+            // Resolve color through the standard path (currently 'on' -> yellow)
+            const hatchColor = this.core.getLayerColorSettings(layer);
+
+            // Use the same screen-pixel-based stroke width as standard offsets.
+            // Hatch metadata carries toolDiameter for future export use, but rendering uses a zoom-invariant stroke like all other offset geometry.
+            const fc = this.core.frameCache;
+            const lineWidth = Math.max(this.primitiveRenderer.cfg.stroke.offset * fc.invScale, fc.minWorldWidth);
+
+            this.ctx.save();
+            this.ctx.strokeStyle = hatchColor;
+            this.ctx.lineWidth = lineWidth;
+            this.ctx.lineCap = 'butt';
+            this.ctx.lineJoin = 'miter';
+            this.ctx.setLineDash([]);
+
+            // Single batched path for all hatch lines
+            this.ctx.beginPath();
+
+            const entries = layer.renderCache?.entries || 
+                layer.primitives.map(p => ({ primitive: p, bounds: p.getBounds(), screenSize: 1 }));
+
+            let batchedCount = 0;
+
+            for (const entry of entries) {
+                this.core.renderStats.primitives++;
+
+                // Viewport culling still applies per-primitive — lines off-screen are cheap to skip and the check is just 4 comparisons.
+                if (!this.core.boundsIntersect(entry.bounds, viewBounds)) {
+                    this.core.renderStats.skippedPrimitives++;
+                    this.core.renderStats.culledViewport++;
+                    continue;
+                }
+
+                const prim = entry.primitive;
+                this.core.renderStats.renderedPrimitives++;
+
+                // Accumulate into the batch path.
+                // Hatch primitives are always 2-point open paths from HatchGenerator.
+                if (prim.contours && prim.contours[0] && prim.contours[0].points.length >= 2) {
+                    const pts = prim.contours[0].points;
+                    this.ctx.moveTo(pts[0].x, pts[0].y);
+                    for (let i = 1; i < pts.length; i++) {
+                        this.ctx.lineTo(pts[i].x, pts[i].y);
+                    }
+                    batchedCount++;
+                }
+            }
+
+            // Single draw call for the entire layer
+            if (batchedCount > 0) {
+                this.ctx.stroke();
+                this.core.renderStats.drawCalls++;
+            }
+
+            this.ctx.restore();
         }
 
         // ========================================================================

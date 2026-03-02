@@ -1,0 +1,293 @@
+<!DOCTYPE html>
+<html lang="en" data-theme="dark">
+<head>
+    <meta charset="UTF-8">
+    <!--!
+        @file        easytrace5000/doc/laser.html
+        @description Laser Guide
+        @author      Eltryus - Ricardo Marques
+        @copyright   2025-2026 Eltryus - Ricardo Marques
+        @see         {@link https://github.com/RicardoJCMarques/EasyTrace5000}
+        @license     AGPL-3.0-or-later
+    -->
+    <!--
+        EasyTrace5000 - Advanced PCB Isolation CAM Workspace
+        Copyright (C) 2025-2026 Eltryus
+
+        This program is free software: you can redistribute it and/or modify
+        it under the terms of the GNU Affero General Public License as published by
+        the Free Software Foundation, either version 3 of the License, or
+        (at your option) any later version.
+
+        This program is distributed in the hope that it will be useful,
+        but WITHOUT ANY WARRANTY; without even the implied warranty of
+        MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+        GNU Affero General Public License for more details.
+
+        You should have received a copy of the GNU Affero General Public License
+        along with this program.  If not, see <https://www.gnu.org/licenses/>.
+    -->
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
+    <title>EasyTrace5000 | Laser Processing Guide</title>
+    
+    <meta name="description" content="Experimental guide for laser-based PCB fabrication. SVG and DXF geometry for ablation, stencils, and soldermask clearing.">
+    <meta name="author" content="Eltryus">
+    <meta name="robots" content="index, follow">
+    <meta name="theme-color" content="#1a1a1a">
+
+    <link rel="canonical" href="https://cam.eltryus.design/easytrace5000/doc/laser">
+
+    <meta property="og:type" content="article">
+    <meta property="og:url" content="https://cam.eltryus.design/easytrace5000/doc/laser">
+    <meta property="og:title" content="EasyTrace5000 | Laser Processing Guide">
+    <meta property="og:description" content="Vector and raster output workflows for laser-based PCB prototyping.">
+    <meta property="og:image" content="https://cam.eltryus.design/images/social-preview.jpg">
+    <meta property="og:image:width" content="1200">
+    <meta property="og:image:height" content="630">
+    <meta property="og:site_name" content="EasyTrace5000">
+    <meta property="og:locale" content="en_US">
+
+    <link rel="icon" type="image/png" href="../../images/favicon/favicon-96x96.png" sizes="96x96">
+    <link rel="icon" type="image/svg+xml" href="../../images/favicon/favicon.svg">
+    <link rel="shortcut icon" href="../../images/favicon/favicon.ico">
+    <link rel="apple-touch-icon" sizes="180x180" href="../../images/favicon/apple-touch-icon.png">
+    <link rel="manifest" href="../../images/favicon/site.webmanifest">
+
+    <link rel="stylesheet" href="../../css/base.css">
+    <link rel="stylesheet" href="../../css/components.css">
+    <link rel="stylesheet" href="../../css/theme.css">
+    <link rel="stylesheet" href="../../css/doc.css">
+
+    <script type="application/ld+json">
+    [
+        {
+            "@context": "https://schema.org",
+            "@type": "TechArticle",
+            "headline": "Laser Pipeline Guide for PCB Fabrication",
+            "description": "Placeholder documentation for using lasers to fabricate PCBs and stencils.",
+            "author": { "@type": "Organization", "name": "Eltryus" },
+            "publisher": { "@type": "Organization", "name": "Eltryus" },
+            "datePublished": "2025-01-16",
+            "dateModified": "2026-03-02"
+        },
+        {
+            "@context": "https://schema.org",
+            "@type": "BreadcrumbList",
+            "itemListElement": [
+                { "@type": "ListItem", "position": 1, "name": "EasyTrace5000", "item": "https://cam.eltryus.design/" },
+                { "@type": "ListItem", "position": 2, "name": "Documentation", "item": "https://cam.eltryus.design/easytrace5000/doc/" },
+                { "@type": "ListItem", "position": 3, "name": "Laser Guide", "item": "https://cam.eltryus.design/easytrace5000/doc/laser" }
+            ]
+        }
+    ]
+    </script>
+</head>
+<body>
+    <!-- Skip link for keyboard accessibility -->
+    <a href="#doc-content" class="skip-link">Skip to Main Content</a>
+
+    <!-- Header -->
+    <header class="doc-header">
+        <div class="doc-brand">
+            <a href="/" aria-label="EasyTrace5000 Homepage">EasyTrace5000</a>
+        </div>
+
+        <button class="doc-menu-toggle" aria-label="Toggle Navigation Menu" aria-expanded="false">
+            <svg class="icon-menu" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+                <line x1="3" y1="12" x2="21" y2="12"></line>
+                <line x1="3" y1="6" x2="21" y2="6"></line>
+                <line x1="3" y1="18" x2="21" y2="18"></line>
+            </svg>
+            <svg class="icon-close" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+                <line x1="18" y1="6" x2="6" y2="18"></line>
+                <line x1="6" y1="6" x2="18" y2="18"></line>
+            </svg>
+        </button>
+
+        <nav class="doc-nav" aria-label="Main Navigation">
+            <a href="/" draggable="false" aria-label="Return to Homepage">← Home</a>
+            <a href="/easytrace5000/" draggable="false" aria-label="Launch Workspace">Launch App</a>
+            <span class="separator" aria-hidden="true"></span>
+            
+             <a href="./" draggable="false" aria-label="Documentation Index">Docs</a>
+            <a href="cnc" draggable="false" aria-label="CNC Milling Guide">CNC Guide</a>
+            <a href="laser" class="active" draggable="false" aria-current="page" aria-label="Laser Processing Guide">Laser Guide</a>
+            <a href="accessibility" draggable="false" aria-label="Accessibility Statement">Accessibility</a>
+            <span class="separator" aria-hidden="true"></span>
+            <a href="https://github.com/RicardoJCMarques/EasyTrace5000" target="_blank" draggable="false" aria-label="GitHub Repository (opens in a new tab)">GitHub</a>
+
+            <button class="theme-toggle" id="theme-toggle" title="Toggle Theme" aria-label="Toggle between light and dark theme">
+                <svg class="sun-icon" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" aria-hidden="true"><circle cx="12" cy="12" r="5"></circle><line x1="12" y1="1" x2="12" y2="3"></line><line x1="12" y1="21" x2="12" y2="23"></line><line x1="4.22" y1="4.22" x2="5.64" y2="5.64"></line><line x1="18.36" y1="18.36" x2="19.78" y2="19.78"></line><line x1="1" y1="12" x2="3" y2="12"></line><line x1="21" y1="12" x2="23" y2="12"></line><line x1="4.22" y1="19.78" x2="5.64" y2="18.36"></line><line x1="18.36" y1="5.64" x2="19.78" y2="4.22"></line></svg>
+                <svg class="moon-icon" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" aria-hidden="true"><path d="M21 12.79A9 9 0 1 1 11.21 3 7 7 0 0 0 21 12.79z"></path></svg>
+            </button>
+        </nav>
+    </header>
+
+    <div class="doc-wrapper has-sidebar">
+        <!-- Sidebar TOC -->
+        <nav class="doc-sidebar">
+            <h2>Laser Pipeline <span class="doc-badge doc-badge--dev">Dev</span></h2>
+            <ol>
+                <li><a href="#overview" draggable="false">Overview</a></li>
+                <li>
+                    <a href="#workflow" draggable="false">The Workflow</a>
+                    <ol>
+                        <li><a href="#workflow-loading" draggable="false">Loading Files</a></li>
+                        <li><a href="#workflow-offsets" draggable="false">Generating Geometry</a></li>
+                        <li><a href="#workflow-export" draggable="false">Exporting</a></li>
+                    </ol>
+                </li>
+                <li>
+                    <a href="#operations" draggable="false">Operation Types</a>
+                    <ol>
+                        <li><a href="#op-isolation" draggable="false">Isolation</a></li>
+                        <li><a href="#op-drilling" draggable="false">Drilling</a></li>
+                        <li><a href="#op-cutout" draggable="false">Board Cutout</a></li>
+                        <li><a href="#op-stencil" draggable="false">Stencil Generation</a></li>
+                        <li><a href="#op-soldermask" draggable="false">Soldermask Clearing</a></li>
+                    </ol>
+                </li>
+                <li><a href="#export" draggable="false">Export Formats</a></li>
+                <li><a href="#use-cases" draggable="false">Use Cases</a></li>
+                <li><a href="#experimental" draggable="false">Experimental</a></li>
+            </ol>
+        </nav>
+
+        <!-- Main Content -->
+        <main id="doc-content" class="doc-main">
+            <section class="hero hero--compact">
+                <h1>EasyTrace5000 - Laser Processing Guide</h1>
+                <p class="tagline">Advanced vector and raster export workflows for laser-based PCB fabrication</p>
+            </section>
+
+            <section id="overview">
+                <h2>Overview & Architecture</h2>
+
+                <div class="callout callout--warning">
+                    <h3>TOXIC FUME HAZARD</h3>
+                    <p><strong>Active Ventilation Mandatory:</strong> Laser processing vaporizes the epoxy, phenolic resins, and fiberglass in PCBs, releasing <strong>highly toxic fumes</strong> (including carbon monoxide, formaldehyde, and various carcinogens).</p>
+                    <ul>
+                        <li><strong>Fiber/Diode Lasers:</strong> Must be actively vented to the outdoors or passed through high-grade industrial HEPA/Carbon filtration.</li>
+                        <li><strong>UV Lasers:</strong> Treat UV laser ablation with the same extreme caution regarding microscopic particulates and chemical fumes.</li>
+                    </ul>
+                </div>
+
+                <p>The EasyTrace5000 Laser pipeline is engineered to generate highly optimized 2D vector and high-resolution raster files from standard PCB design files (Gerber, Excellon, SVG). Unlike the CNC pipeline—which must simulate Z-axis depths, plunge rates, and tool radiuses—the laser pipeline operates strictly in 2D coordinate space. </p>
+
+                <p>Because laser processing does not require toolpath depth simulation, the application intelligently bypasses the 3D preview stage, processing source geometry directly into export-ready analytic boundaries and fill patterns. The application does not control your laser hardware directly; it performs the computationally heavy geometric boolean operations, true-bounds calculations, and path optimizations, delivering precision files tailored for external control software like LightBurn, EZCAD, or RDWorks.</p>
+                
+                            </section>
+
+            <section id="workflow">
+                <h2>The Laser Workflow</h2>
+                <p>The user journey in the laser pipeline is distinctly streamlined compared to mechanical milling. Here is the technical breakdown of the workflow.</p>
+
+                <h3 id="workflow-loading">Stage 1 & 2: Loading & Coordinate Transformations</h3>
+                <p>Source files are loaded and parsed via the same robust analytic engine used for CNC operations. <strong>Isolation</strong> and <strong>Clearing</strong> operations parse Gerber (RS-274X) files, <strong>Drilling</strong> parses Excellon files, and <strong>Cutouts</strong> accept Gerbers or SVGs.</p>
+                <p>During coordinate setup, any applied Origin Offsets, Board Rotations, or Mirroring transformations are tracked globally. Crucially, the <code>LaserImageExporter</code> applies these transformation matrices to the analytic geometry <em>before</em> calculating the final SVG/PNG bounding box (the viewBox), ensuring that rotated or mirrored geometry is never clipped or exported with a blank canvas.</p>
+
+                <h3 id="workflow-machine">Stage 3: Global Machine Settings</h3>
+                <p>When the Laser pipeline is active, the Machine Settings panel exposes two critical baseline parameters:</p>
+                <dl>
+                    <dt>Laser Spot Size (Kerf)</dt>
+                    <dd>The effective focal diameter of your laser beam in millimeters. The offsetting engine uses this value identically to a CNC "Tool Diameter" to calculate accurate offsets.</dd>
+                    <dt>Export Format</dt>
+                    <dd>Determines the target renderer: <strong>SVG</strong> for true mathematical vectors or <strong>PNG</strong> for high-DPI rasterized images. Note: Switching to PNG dynamically hides hatch and offset strategy options, as filling is implicitly handled by pixel rasterization.</dd>
+                </dl>
+
+                <h3 id="workflow-paths">Stage 4: Generating Laser Paths</h3>
+                <p>Upon clicking <strong>Generate Laser Paths</strong>, the core triggers the Geometry Engine. Depending on the operation and selected strategy, it translates your parameters (Spot Size, Isolation Width, Step Over) into precise 2D geometry. Because laser operations lack a Z-axis simulation requirement, the operation is immediately marked as <code>exportReady = true</code>, bypassing the preview stage and transitioning the properties panel directly to an "Export Summary".</p>
+
+                <h3 id="workflow-export">Stage 5: Operations & Export Manager</h3>
+                <p>The Export Manager acts as the final packager for your laser files. Here, you configure export-specific metadata:</p>
+                <dl>
+                    <dt>Layer Colors</dt>
+                    <dd>Assign rgb colors (e.g., <code>(255.0.0)</code> for Isolation, <code>(0.0.255)</code> for Drill). The SVG exporter applies these as <code>stroke</code> or <code>fill</code> attributes. Laser control software uses these colors to map independent power, speed, and frequency settings.</dd>
+                    <dt>Raster Resolution (DPI)</dt>
+                    <dd>If PNG is selected, this dictates the pixel density (up to 4000 DPI). The exporter calculates the exact pixel dimensions based on the transformed physical bounds and the DPI.</dd>
+                    <dt>Export Margin Padding</dt>
+                    <dd>Injects a physical buffer (in mm) around the true bounding box to ensure the laser head has sufficient overscan area without clipping the geometry.</dd>
+                </dl>
+            </section>
+
+            <section id="operations">
+                <h2>Operation Types & Clearing Strategies</h2>
+                
+                <p>The geometry generation logic dynamically adapts to the operation type. The core concept relies on "Clearance Polygons"—the specific area requiring ablation.</p>
+                
+                
+                <h3 id="op-isolation">Isolation Routing & Copper Clearing</h3>
+                <p>For <strong>Clearing</strong> operations, the clearance zone is simply the source geometry itself. For <strong>Isolation</strong> operations, the engine dynamically calculates a "halo" by expanding the original copper traces by the user-defined <code>laserIsolationWidth</code> and performing a boolean difference against the original footprint.</p>
+
+                <p>Once the clearance zone is established, you can select one of three <strong>Clearing Strategies</strong>:</p>
+
+                <dl>
+                    <dt>Offset Paths (Concentric)</dt>
+                    <dd>Generates concentric lines shrinking inward from the clearance boundary. The required number of passes is mathematically derived from the total isolation width and the <code>laserStepOver</code> percentage. This strategy is highly recommended as it prevents the corner "streaking" artifacts common in directional hatching.</dd>
+                    <dt>Filled Polygon</dt>
+                    <dd>Exports the clearance zone as a solid SVG <code>&lt;path&gt;</code> with a <code>fill</code> attribute. Use this if you prefer your external laser software (like LightBurn) to calculate its own native hatch patterns internally.</dd>
+                    <dt>Hatch Fill</dt>
+                    <dd>Generates dense, directional line coverage across the clearance zone. You control the <code>laserHatchAngle</code> (e.g., 45°) and the number of angular passes (<code>laserHatchPasses</code>). To optimize laser travel, the exporter applies an advanced <strong>Colinear Hatch Fusion</strong> algorithm (detailed below).</dd>
+                </dl>
+
+                <h3 id="op-cutout">Drill & Board Cutout</h3>
+                <p>Because holes and board outlines are fundamentally single-line vector cuts rather than broad ablation zones, they do not utilize clearing strategies. Instead, you define the <strong>Cut Side</strong>:</p>
+                <ul>
+                    <li><strong>Outside:</strong> Generates a path offset outward by half the laser spot size, ensuring the physical board remains dimensionally accurate.</li>
+                    <li><strong>Inside:</strong> Offsets inward, typically used for internal pocketing.</li>
+                    <li><strong>On Line:</strong> Fires the laser directly down the mathematical perimeter coordinate (zero offset).</li>
+                </ul>
+            </section>
+
+            <section id="export">
+                <h2>Export Mechanics & Optimizations</h2>
+                <p>The <code>LaserImageExporter</code> handles the final translation of analytic primitives into downloadable files.</p>
+
+                <h3 id="export-svg">SVG (Vector Export)</h3>
+                <p>When exporting vectors, standard browsers display 0.01mm strokes as invisible. To fix this while maintaining dimensional accuracy for CAM software, the exporter injects explicit CSS attributes (<code>stroke-width="1px"</code> and <code>-inkscape-stroke:hairline</code>), while preserving the physical XML attribute <code>stroke-width="0.01"</code>. This ensures browsers render a visible line, but laser software imports the path as a zero-width, highly precise cutting vector. Additionally, the exporter natively reconstructs poly-lines into true SVG Arc (<code>A</code>) commands, drastically reducing file size and allowing for perfectly smooth curves.</p>
+
+                <h3 id="export-png">The PNG Split Rule (Raster Export)</h3>
+                <p>Rasterizing a PCB design into a PNG is excellent for direct image engraving modes or photoresist exposure. However, <strong>Drill</strong> and <strong>Cutout</strong> operations are single-line paths that lose their dimensional meaning when converted to pixels. To solve this, the Export Manager enforces the <strong>PNG Split Rule</strong>: If PNG export is selected, Isolation and Clearing layers are compiled into a high-DPI <code>.png</code> file, while Drill and Cutout operations are automatically filtered out and exported as a perfectly aligned secondary <code>-vectors.svg</code> file.</p>
+
+                <div class="callout callout--info">
+                    <h4>Colinear Hatch Fusion Optimization</h4>
+                    <p>A small bottleneck in laser processing is the time the laser head spends turning on/off and rapidly traveling between short line segments. When using the <strong>Hatch Fill</strong> strategy, the <code>LaserImageExporter</code> runs a post-processing algorithm (<code>_fuseColinearSegments</code>) across all layers. It mathematically maps all hatch lines to their perpendicular scan line distances. If multiple line segments lay on the exact same trajectory and overlap or touch (within a 0.001mm tolerance), they are fused into a single continuous continuous path. This minimizes laser head rapid-travel events and slightly compresses the final exported file size.</p>
+                </div>
+            </section>
+        </main>
+        <!-- Footer -->
+        <footer class="doc-footer" aria-label="Footer">
+            <p>
+                <a href="#doc-content" draggable="false" aria-label="Scroll back to top">Back to Top</a> |
+                <a href="https://github.com/RicardoJCMarques/EasyTrace5000" target="_blank" draggable="false" aria-label="GitHub Repository (opens in a new tab)">GitHub</a> |
+                <a href="/#support" draggable="false" aria-label="Support Development via Sponsorship">Support Development</a> |
+                <a href="../../LICENSE" target="_blank" draggable="false" aria-label="AGPLv3 License (opens in a new tab)">AGPLv3 Licensed</a>
+            </p>
+        </footer>
+    </div>
+
+    <!-- Scripts -->
+    <script defer src="../../themes/theme-loader.js"></script>
+    <script>
+        document.addEventListener('DOMContentLoaded', () => {
+            // Theme Toggle Logic
+            const themeBtn = document.getElementById('theme-toggle');
+            if (themeBtn && window.ThemeLoader) {
+                themeBtn.addEventListener('click', () => window.ThemeLoader.toggleTheme());
+            }
+
+            // Mobile Menu Logic
+            const menuBtn = document.querySelector('.doc-menu-toggle');
+            const nav = document.querySelector('.doc-nav');
+
+            if (menuBtn && nav) {
+                menuBtn.addEventListener('click', () => {
+                    const isExpanded = menuBtn.getAttribute('aria-expanded') === 'true';
+                    menuBtn.setAttribute('aria-expanded', !isExpanded);
+                    nav.classList.toggle('is-open');
+                });
+            }
+        });
+    </script>
+</body>
+</html>

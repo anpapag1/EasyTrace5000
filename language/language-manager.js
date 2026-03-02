@@ -36,13 +36,12 @@
 
         /**
          * Loads the language file from the server.
-         * @param {string} [lang='en'] - The language to load (future use).
          */
         async load(lang = 'en') {
             try {
-                const response = await fetch(`language/${lang}.json`);
+                const response = await fetch(`../language/${lang}.json`);
                 if (!response.ok) {
-                    throw new Error(`Failed to load language/${lang}.json: ${response.statusText}`);
+                    throw new Error(`Failed to load ../language/${lang}.json: ${response.statusText}`);
                 }
                 const data = await response.json();
                 this.strings = data.strings || {}; // Store just the "strings" object
@@ -57,9 +56,6 @@
 
         /**
          * Gets a string by its key.
-         * @param {string} key - The key, e.g., "toolbar.addFiles" or "tooltips.toolDiameter"
-         * @param {string} [defaultValue=''] - A fallback value if the key isn't found.
-         * @returns {string}
          */
         get(key, defaultValue = '') {
             if (!this.isLoaded) {
@@ -78,8 +74,6 @@
 
         /**
          * Checks if a translation key exists.
-         * @param {string} key - The key to check, e.g., "tooltips.parameters.toolDiameter"
-         * @returns {boolean}
          */
         has(key) {
             try {

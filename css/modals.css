@@ -131,7 +131,6 @@
 .modal-footer {
     display: flex;
     gap: var(--spacing-sm);
-    justify-content: flex-end;
     align-items: center;
     padding: var(--modal-padding-block) var(--modal-padding-inline);
     border-top: 1px solid var(--color-border-primary);
@@ -142,6 +141,8 @@
 
 /* ============================================================================
    WELCOME MODAL
+   Pipeline card component styles live here for the app modals.
+   The doc page (doc.css) has its own pipeline card presentation.
    ============================================================================ */
 
 .welcome-intro {
@@ -179,6 +180,12 @@
     color: var(--color-text-primary);
     cursor: pointer;
     box-sizing: border-box;
+}
+
+.pipeline-card.is-locked {
+    opacity: 0.5;
+    pointer-events: none;
+    cursor: not-allowed;
 }
 
 .pipeline-card--active {
@@ -351,6 +358,15 @@
 .mode-laser .icon-laser {
     display: block;
     color: var(--color-pipeline-laser);
+}
+
+/* Hide the opposite icon in each mode */
+.mode-cnc .icon-laser {
+    display: none;
+}
+
+.mode-laser .icon-cnc {
+    display: none;
 }
 
 .quickstart-content {
@@ -578,10 +594,6 @@
 /* ============================================================================
    SUPPORT MODAL
    ============================================================================ */
-
-#support-modal .modal-footer {
-    justify-content: flex-start;
-}
 
 .support-content {
     display: flex;
@@ -876,6 +888,12 @@
     margin-top: 0;
 }
 
+.gcode-options.is-full-width {
+    flex: 1;
+    border-right: none;
+    padding-right: 0;
+}
+
 .gcode-preview {
     flex: 1;
     display: flex;
@@ -934,6 +952,88 @@
     font-size: var(--font-size-xs);
     color: var(--color-text-hint);
     margin-bottom: var(--spacing-sm);
+}
+
+/* Contextual Disabled State for Export Blocks */
+.export-block.is-disabled {
+    opacity: 0.4;
+    pointer-events: none;
+    filter: grayscale(80%);
+}
+
+.export-route-badge {
+    font-size: 10px;
+    padding: 1px 4px;
+    border-radius: 3px;
+    margin-left: auto;
+    border: 1px solid currentColor;
+}
+
+.export-route-badge--laser {
+    color: #ff6b6b;
+}
+
+.export-route-badge--cnc {
+    color: #4ecdc4;
+}
+
+.export-op-item {
+    display: flex;
+    align-items: center;
+    padding: var(--spacing-sm);
+    margin-bottom: var(--spacing-xs);
+    background: var(--color-bg-primary);
+    border-radius: var(--radius);
+    cursor: grab;
+}
+
+.export-op-item:hover {
+    background: var(--color-bg-hover);
+}
+
+.export-op-item .tree-expand-icon {
+    margin-right: var(--spacing-sm);
+}
+
+.export-op-item input[type="checkbox"] {
+    margin-right: var(--spacing-sm);
+}
+
+.export-op-item .file-label {
+    flex: 1;
+    display: flex;
+    align-items: center;
+    cursor: pointer;
+}
+
+/* Laser Export Options (moved from layout.css) */
+.laser-color-grid {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: var(--spacing-sm);
+}
+
+.laser-color-field {
+    display: flex;
+    align-items: center;
+    gap: var(--spacing-sm);
+}
+
+.laser-color-field input[type="color"] {
+    width: 32px;
+    height: 32px;
+    border: 1px solid var(--color-border-secondary);
+    border-radius: var(--radius);
+    cursor: pointer;
+}
+
+.laser-diode-note {
+    margin-top: var(--spacing-md);
+    color: var(--color-text-secondary);
+}
+
+.export-footer #export-cancel-btn {
+    margin-right: auto; 
 }
 
 /* ============================================================================
@@ -1175,10 +1275,6 @@
     .pipeline-selection {
         grid-template-columns: 1fr 1fr;
         gap: var(--spacing-sm);
-    }
-
-    .pipeline-card {
-        padding: var(--spacing-sm);
     }
 
     .pipeline-icon svg {

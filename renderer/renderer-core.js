@@ -151,6 +151,7 @@
                 isPreprocessed: options.isPreprocessed,
                 isOffset: options.type === 'offset',
                 isPreview: options.type === 'preview',
+                isHatch: options.isHatch,
                 operationId: options.operationId,
                 operationType: options.operationType,
                 offsetType: options.offsetType,
@@ -169,7 +170,7 @@
 
         /**
          * Builds lightweight bounds cache for culling
-         * This is the key optimization: cache bounds for fast culling, but don't pay the Path2D allocation cost.
+         * cache bounds for fast culling, but don't pay the Path2D allocation cost.
          */
         _buildLayerBoundsCache(layer) {
             if (!layer.primitives || layer.primitives.length === 0) {
@@ -714,7 +715,10 @@
                         internal: read('--color-geometry-offset-internal'),
                         on: read('--color-geometry-offset-on')
                     },
-                    preview: read('--color-geometry-preview')
+                    preview: read('--color-geometry-preview'),
+                    laser: {
+                        filled: read('--color-geometry-laser-filled')
+                    }
                 },
                 primitives: {
                     offsetInternal: read('--color-primitive-offset-internal'),
