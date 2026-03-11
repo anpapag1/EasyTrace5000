@@ -107,118 +107,6 @@
             }
         }
 
-        // Calculate signed area of a path (negative = clockwise, positive = CCW)
-        calculateSignedArea(points) {
-            if (!this.initialized || !points || points.length < 3) {
-                return 0;
-            }
-
-            const { Path64, Point64, AreaPath64 } = this.clipper2;
-            const path = new Path64();
-
-            try {
-                // Add points to path with proper scaling
-                points.forEach(p => {
-                    const x = BigInt(Math.round(p.x * this.options.scale));
-                    const y = BigInt(Math.round(p.y * this.options.scale));
-                    const point = new Point64(x, y, BigInt(0));
-                    path.push_back(point);
-                    point.delete();
-                });
-
-                // Calculate area using Clipper2's native function
-                const area = AreaPath64(path);
-
-                // Convert BigInt to number and unscale
-                // The area is in scaled units squared, so divide by scale²
-                const scaledArea = Number(area);
-                const actualArea = scaledArea / (this.options.scale * this.options.scale);
-
-                return actualArea;
-
-            } finally {
-                // Clean up WASM objects
-                if (path && typeof path.delete === 'function') {
-                    path.delete();
-                }
-            }
-        }
-
-        // Calculate signed area without scaling (for already-scaled points)
-        calculateSignedAreaRaw(points) {
-            if (!this.initialized || !points || points.length < 3) {
-                return 0;
-            }
-
-            const { Path64, Point64, AreaPath64 } = this.clipper2;
-            const path = new Path64();
-
-            try {
-                // Add points without scaling (assume already in integer coordinates)
-                points.forEach(p => {
-                    const x = typeof p.x === 'bigint' ? p.x : BigInt(Math.round(p.x));
-                    const y = typeof p.y === 'bigint' ? p.y : BigInt(Math.round(p.y));
-                    const point = new Point64(x, y, BigInt(0));
-                    path.push_back(point);
-                    point.delete();
-                });
-
-                // Calculate area
-                const area = AreaPath64(path);
-                return Number(area);
-
-            } finally {
-                if (path && typeof path.delete === 'function') {
-                    path.delete();
-                }
-            }
-        }
-
-        // Determine if points form a clockwise path
-        // In screen coordinates (Y-down): negative area = CW, positive = CCW
-        isClockwise(points) {
-            const area = this.calculateSignedArea(points);
-            // In Clipper2's coordinate system with Y-down (screen coords):
-            // Negative area = Clockwise
-            // Positive area = Counter-clockwise
-            return area < 0;
-        }
-
-        // Determine orientation specifically for arc reconstruction
-        determineArcOrientation(points, center = null) {
-            if (!this.initialized || !points || points.length < 2) {
-                return false; // Default to CCW
-            }
-
-            // For 2-point arcs
-            if (points.length === 2 && center) {
-                // Use the angle progression to determine direction
-                const p1 = points[0];
-                const p2 = points[1];
-
-                const angle1 = Math.atan2(p1.y - center.y, p1.x - center.x);
-                const angle2 = Math.atan2(p2.y - center.y, p2.x - center.x);
-
-                // Normalize angle difference
-                let angleDiff = angle2 - angle1;
-                while (angleDiff > Math.PI) angleDiff -= 2 * Math.PI;
-                while (angleDiff < -Math.PI) angleDiff += 2 * Math.PI;
-
-                // In screen coordinates (Y-down):
-                // Positive angle difference = CW
-                // Negative angle difference = CCW
-                return angleDiff > 0;
-            }
-
-            // For 3+ points, use signed area
-            const area = this.calculateSignedArea(points);
-
-            // In screen coordinates (Y-down):
-            // Negative area = Clockwise
-            // Positive area = Counter-clockwise
-            return area < 0;
-        }
-
         // Pack metadata into 64-bit Z coordinate
         packMetadata(curveId, segmentIndex, clockwise = false, reserved = 0) {
             if (!curveId || curveId === 0) return BigInt(0);
@@ -268,25 +156,17 @@
                 paths.forEach(path => {
                     if (path.contours && path.contours.length > 0) {
                         path.contours.forEach(contour => {
-                            const polarity = contour.isHole ? 'clear' : 'dark';
-                            // Compute winding in JS natively
-                            const isCW = GeometryUtils.isClockwise(contour.points); 
-                            // Feed directly to wrapper
-                            const clipperPath = this._jsPathToClipper(contour.points, polarity, isCW); 
-                            
+                            const clipperPath = this._jsPathToClipper(contour.points);
                             if (clipperPath) {
                                 input.push_back(clipperPath);
                                 objects.push(clipperPath);
                             }
                         });
                     } else if (path.type !== 'path') {
-                        // Fallback: analytic primitive that wasn't pre-tessellated
                         const pPath = GeometryUtils.primitiveToPath(path);
                         if (pPath && pPath.contours) {
                             pPath.contours.forEach(contour => {
-                                const polarity = contour.isHole ? 'clear' : 'dark';
-                                const isCW = GeometryUtils.isClockwise(contour.points);
-                                const clipperPath = this._jsPathToClipper(contour.points, polarity, isCW);
+                                const clipperPath = this._jsPathToClipper(contour.points);
                                 if (clipperPath) {
                                     input.push_back(clipperPath);
                                     objects.push(clipperPath);
@@ -329,31 +209,22 @@
                 const clips = new Paths64();
                 objects.push(subjects, clips);
 
-                // Shared helper: iterate all contours with correct per-contour polarity.
-                // Both subjects and clips need outer=CCW, hole=CW for NonZero fill to correctly evaluate winding (outer +1, hole -1, net=0 inside hole).
+                // Winding is trusted from upstream — outer=CCW (+1), hole=CW (-1) in Y-up.
                 const addAllContours = (pathsArray, clipperPathsObj) => {
                     pathsArray.forEach(path => {
                         if (path.contours && path.contours.length > 0) {
                             path.contours.forEach(contour => {
-                                const polarity = contour.isHole ? 'clear' : 'dark';
-                                // Compute winding in JS natively
-                                const isCW = GeometryUtils.isClockwise(contour.points);
-                                // Feed directly to wrapper
-                                const clipperPath = this._jsPathToClipper(contour.points, polarity, isCW);
-                                
+                                const clipperPath = this._jsPathToClipper(contour.points);
                                 if (clipperPath) {
                                     clipperPathsObj.push_back(clipperPath);
                                     objects.push(clipperPath);
                                 }
                             });
                         } else if (path.type !== 'path') {
-                            // Fallback: analytic primitive that wasn't pre-tessellated
                             const pPath = GeometryUtils.primitiveToPath(path);
                             if (pPath && pPath.contours) {
                                 pPath.contours.forEach(contour => {
-                                    const polarity = contour.isHole ? 'clear' : 'dark';
-                                    const isCW = GeometryUtils.isClockwise(contour.points);
-                                    const clipperPath = this._jsPathToClipper(contour.points, polarity, isCW);
+                                    const clipperPath = this._jsPathToClipper(contour.points);
                                     if (clipperPath) {
                                         clipperPathsObj.push_back(clipperPath);
                                         objects.push(clipperPath);
@@ -390,7 +261,7 @@
         }
 
         // Convert JS path to Clipper Path64 with metadata packing
-        _jsPathToClipper(points, polarity = 'dark', isClockwise = null) {
+        _jsPathToClipper(points) {
             const { Path64, Point64 } = this.clipper2;
 
             if (!points || points.length < 3) return null;
@@ -398,9 +269,6 @@
             const path = new Path64();
 
             try {
-                let metadataPointCount = 0;
-                let debugSample = null;
-
                 const getClockwiseForCurve = (curveId) => {
                     if (window.globalCurveRegistry) {
                         const curve = window.globalCurveRegistry.getCurve(curveId);
@@ -409,42 +277,24 @@
                     return false;
                 };
 
-                points.forEach((p, index) => {
+                // Winding is trusted from upstream (parser enforces outer=CCW, hole=CW in Y-up).
+                for (let i = 0; i < points.length; i++) {
+                    const p = points[i];
                     const x = BigInt(Math.round(p.x * this.options.scale));
                     const y = BigInt(Math.round(p.y * this.options.scale));
 
                     let z = BigInt(0);
-                    if (this.supportsZ) {
-                        if (p.curveId !== undefined && p.curveId !== null && p.curveId > 0) {
-                            const curveClockwise = getClockwiseForCurve(p.curveId);
-                            z = this.packMetadata(p.curveId, p.segmentIndex || 0, curveClockwise, 0);
-                            metadataPointCount++;
-                        }
+                    if (this.supportsZ && p.curveId !== undefined &&
+                        p.curveId !== null && p.curveId > 0) {
+                        const curveClockwise = getClockwiseForCurve(p.curveId);
+                        z = this.packMetadata(p.curveId, p.segmentIndex || 0, curveClockwise, 0);
                     }
 
                     const point = new Point64(x, y, z);
                     path.push_back(point);
-                    point.delete(); // Prevent memory leak during build
-                });
-
-                // Use the injected JS winding. If omitted, calculate natively in JS.
-                const pathIsClockwise = isClockwise !== null ? isClockwise : GeometryUtils.isClockwise(points);
-
-                const needsReversal = 
-                    (polarity === 'dark' && pathIsClockwise) ||
-                    (polarity === 'clear' && !pathIsClockwise);
-
-                if (needsReversal) {
-                    const reversed = new Path64();
-                    for (let i = path.size() - 1; i >= 0; i--) {
-                        const pt = path.get(i);
-                        reversed.push_back(pt);
-                        if (pt.delete) pt.delete(); // Prevent memory leak during reversal
-                    }
-                    path.delete(); // Free the original forward path
-                    return reversed;
+                    point.delete();
                 }
-                
+
                 return path;
 
             } catch (error) {
@@ -533,6 +383,7 @@
                         nestingLevel: level,
                         isHole: isHole,
                         parentId: parentIdx,
+                        arcSegments: [],
                         curveIds: Array.from(contourCurveIds) // Store curve IDs per contour
                     });
 

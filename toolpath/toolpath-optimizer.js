@@ -536,7 +536,7 @@
 
             const rapidCost = this.calculateRapidCost(fromPos, bestRapidPoint, closestRapidXYDist);
 
-            if (this.options.debug) {
+            if (debugConfig.enabled) {
                 const reason = !allowStaydown ? "Not Allowed" : (planMetadata.isPeckMark || planMetadata.isDrillMilling) ? "Drill Op" : "Too Far";
                 console.log(`[Optimizer]   >> Using Rapid Link (${reason}). Cost: ${rapidCost.toFixed(1)}, Dist: ${closestRapidXYDist.toFixed(3)}, Index: ${rapidCommandIndex}`);
             }

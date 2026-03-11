@@ -152,7 +152,7 @@
                 "Optimized toolpaths with staydown clustering and G2/G3 arc reconstruction",
                 "Multiple CNC post-processors supported (GRBL, Marlin, LinuxCNC, Roland RML)"
             ],
-            "softwareVersion": "1.0.8",
+            "softwareVersion": "1.0.9",
             "releaseNotes": "https://github.com/RicardoJCMarques/EasyTrace5000/blob/main/CHANGELOG.md",
             "downloadUrl": "https://github.com/RicardoJCMarques/EasyTrace5000/",
             "installUrl": "https://cam.eltryus.design/easytrace5000/",
@@ -788,7 +788,7 @@
         </div>
         <div class="status-right" id="status-right">
             <div class="status-info license-info">
-                <span title="Version">Version 1.0.8</span> |
+                <span title="Version">Version 1.0.9</span> |
                 <a href="/" title="Return to Homepage" draggable="false">Home</a> |
                 <a href="../LICENSE" target="_blank" title="View License" draggable="false" aria-label="View License (opens in a new tab)">AGPLv3 Licensed</a> |
                 <a href="doc/" target="_blank" title="Documentation" draggable="false" aria-label="Documentation (opens in a new tab)">Doc</a> |
@@ -1495,8 +1495,10 @@
     <script defer src="../geometry/geometry-arc-reconstructor.js"></script>
     <script defer src="../geometry/geometry-clipper-wrapper.js"></script>
     <script defer src="../geometry/geometry-utils.js"></script>
+    <script defer src="../geometry/geometry-utils-math.js"></script>
     <script defer src="../geometry/geometry-utils-hatching.js"></script>
     <script defer src="../geometry/geometry-offsetter.js"></script>
+    <script defer src="../geometry/geometry-offsetter-analytic.js"></script>
     <script defer src="../parsers/primitives.js"></script>
     <script defer src="../parsers/parser-core.js"></script>
     <script defer src="../parsers/parser-gerber.js"></script>
@@ -1540,7 +1542,7 @@
     <!-- Initialization -->
     <script>
         document.addEventListener('DOMContentLoaded', function() {
-            console.log('EasyTrace5000 Advanced Workspace v1.0.8');
+            console.log('EasyTrace5000 Advanced Workspace v1.0.9');
 
             const loadingText = document.getElementById('loading-text');
             const loadingProgress = document.getElementById('loading-progress');

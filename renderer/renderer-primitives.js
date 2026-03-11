@@ -470,8 +470,14 @@
                                 for (let i = currentIndex + 1; i <= arc.startIndex; i++) {
                                     this.ctx.lineTo(contour.points[i].x, contour.points[i].y);
                                 }
-                                this.ctx.arc(arc.center.x, arc.center.y, arc.radius,
-                                    arc.startAngle, arc.endAngle, !arc.clockwise);
+                                if (arc.sweepAngle !== undefined) {
+                                    this.ctx.arc(arc.center.x, arc.center.y, arc.radius,
+                                        arc.startAngle, arc.startAngle + arc.sweepAngle,
+                                        arc.sweepAngle < 0);
+                                } else {
+                                    this.ctx.arc(arc.center.x, arc.center.y, arc.radius,
+                                        arc.startAngle, arc.endAngle, arc.clockwise);
+                                }
                                 currentIndex = arc.endIndex;
                             }
 
@@ -497,7 +503,7 @@
                 this.ctx.rect(primitive.position.x, primitive.position.y, primitive.width, primitive.height);
             } else if (primitive.type === 'arc') {
                 this.ctx.arc(primitive.center.x, primitive.center.y, primitive.radius,
-                    primitive.startAngle, primitive.endAngle, !primitive.clockwise);
+                    primitive.startAngle, primitive.endAngle, primitive.clockwise);
             } else if (primitive.type === 'obround') {
                 let x = primitive.position.x;
                 let y = primitive.position.y;
@@ -584,8 +590,14 @@
                         for (let i = currentIndex + 1; i <= arc.startIndex; i++) {
                             this.ctx.lineTo(points[i].x, points[i].y);
                         }
-                        this.ctx.arc(arc.center.x, arc.center.y, arc.radius,
-                            arc.startAngle, arc.endAngle, !arc.clockwise);
+                        if (arc.sweepAngle !== undefined) {
+                            this.ctx.arc(arc.center.x, arc.center.y, arc.radius,
+                                arc.startAngle, arc.startAngle + arc.sweepAngle,
+                                arc.sweepAngle < 0);
+                        } else {
+                            this.ctx.arc(arc.center.x, arc.center.y, arc.radius,
+                                arc.startAngle, arc.endAngle, arc.clockwise);
+                        }
                         currentIndex = arc.endIndex;
                     }
 
@@ -654,7 +666,7 @@
         _renderArc(primitive, fillColor, strokeColor) {
             this.ctx.beginPath();
             this.ctx.arc(primitive.center.x, primitive.center.y, primitive.radius,
-                primitive.startAngle, primitive.endAngle, !primitive.clockwise);
+                primitive.startAngle, primitive.endAngle, primitive.clockwise);
 
             if (primitive.properties?.fill) {
                 this.ctx.closePath();
@@ -730,7 +742,7 @@
 
                 this.ctx.beginPath();
                 this.ctx.arc(primitive.center.x, primitive.center.y, primitive.radius,
-                    primitive.startAngle, primitive.endAngle, !primitive.clockwise);
+                    primitive.startAngle, primitive.endAngle, primitive.clockwise);
                 this.ctx.stroke();
             } else if (primitive.type === 'path') {
                 this.ctx.strokeStyle = primColors.reconstructedPath;

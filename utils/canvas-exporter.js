@@ -800,7 +800,7 @@ Mode: ${vo.showWireframe ? 'Wireframe' : 'Solid'} | Geometry: ${vo.fuseGeometry 
                 }
 
                 const large = Math.abs(span) > Math.PI ? 1 : 0;
-                const sweep = arc.clockwise ? 1 : 0;
+                const sweep = arc.clockwise ? 0 : 1;
 
                 const rx = this._formatNumber(arc.radius, prec);
                 const ex = this._formatNumber(end.x, prec);

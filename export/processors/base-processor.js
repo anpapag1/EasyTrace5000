@@ -434,7 +434,6 @@
             this.modalState = {
                 motionMode: null,
                 coordinateMode: 'G90',
-                units: null,
                 units: 'G21',
                 plane: 'G17',
                 feedRateMode: 'G94'

@@ -672,10 +672,11 @@
                     while (angleDelta > Math.PI) angleDelta -= 2 * Math.PI;
                     while (angleDelta < -Math.PI) angleDelta += 2 * Math.PI;
 
+                    // Y-up: positive delta = CCW, negative delta = CW
                     if (angleDelta > 0) {
-                        cwVotes++;
-                    } else if (angleDelta < 0) {
                         ccwVotes++;
+                    } else if (angleDelta < 0) {
+                        cwVotes++;
                     }
                 }
 
@@ -687,26 +688,19 @@
                 while (angleDiff > Math.PI) angleDiff -= 2 * Math.PI;
                 while (angleDiff < -Math.PI) angleDiff += 2 * Math.PI;
                 
-                // In a Y-down system, a negative diff is CCW, positive is CW.
-                actuallyClockwise = angleDiff > 0;
+                // Y-up: negative diff = CW
+                actuallyClockwise = angleDiff < 0;
             }
 
             // Calculate sweep angle
             let sweepAngle = endAngle - startAngle;
 
             if (actuallyClockwise) {
-                // Force sweep to be positive for CW
-                if (sweepAngle < 0) sweepAngle += 2 * Math.PI;
-            } else {
-                // Force sweep to be negative for CCW
+                // Y-up standard: CW = negative sweep
                 if (sweepAngle > 0) sweepAngle -= 2 * Math.PI;
-            }
-
-            // If the sweep and direction are mismatched (e.g., CW flag but -270deg sweep) take the shorter sweep.
-            if (actuallyClockwise && sweepAngle < -Math.PI) {
-                 sweepAngle += 2 * Math.PI; // e.g., -270deg -> +90deg
-            } else if (!actuallyClockwise && sweepAngle > Math.PI) {
-                 sweepAngle -= 2 * Math.PI; // e.g., +270deg -> -90deg
+            } else {
+                // Y-up standard: CCW = positive sweep
+                if (sweepAngle < 0) sweepAngle += 2 * Math.PI;
             }
 
             if (curveData.clockwise !== actuallyClockwise) {

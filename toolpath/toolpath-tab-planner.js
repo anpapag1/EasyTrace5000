@@ -28,14 +28,15 @@
 (function() {
     'use strict';
 
+    const config = window.PCBCAMConfig;
+
     /**
      * Calculates and returns tab positions (start/end distances) along a closed contour.
      */
     class ToolpathTabPlanner {
         constructor() {
-            this.TOLERANCE = 0.001;
-            // Tabs will only be placed on a straight segment if its length exceeds this value.
-            this.MIN_SEGMENT_LENGTH = 5.0; // Review - Both these values should be in the config
+            this.TOLERANCE = config.precision.coordinate;
+            this.MIN_SEGMENT_LENGTH = config.toolpath.tabs.minTabLength;
         }
 
         /**

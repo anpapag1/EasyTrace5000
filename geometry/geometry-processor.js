@@ -237,27 +237,7 @@
                 this.debug(`=== UNION OPERATION COMPLETE ===`);
                 this.debug(`Result: ${primitives.length} → ${result.length} primitives`);
 
-                // Ensure proper primitive structure
-                return result.map(p => {
-                    if (typeof PathPrimitive !== 'undefined' && !(p instanceof PathPrimitive)) {
-                        const contours = (p.contours && p.contours.length > 0)
-                            ? p.contours
-                            : [{
-                                points: p.points || [],
-                                isHole: false,
-                                nestingLevel: 0,
-                                parentId: null,
-                                arcSegments: p.arcSegments || [],
-                                curveIds: p.curveIds || []
-                            }];
-
-                        return this._createPathPrimitive(contours, {
-                            ...p.properties,
-                            hasReconstructableCurves: p.hasReconstructableCurves
-                        });
-                    }
-                    return p;
-                });
+                return result;
 
             } catch (error) {
                 console.error('Union operation failed:', error);
@@ -286,27 +266,7 @@
                 this.debug(`=== DIFFERENCE OPERATION COMPLETE ===`);
                 this.debug(`Result: ${result.length} primitives`);
 
-                // Ensure proper primitive structure
-                return result.map(p => {
-                    if (typeof PathPrimitive !== 'undefined' && !(p instanceof PathPrimitive)) {
-                        const contours = (p.contours && p.contours.length > 0)
-                            ? p.contours
-                            : [{
-                                points: p.points || [],
-                                isHole: false,
-                                nestingLevel: 0,
-                                parentId: null,
-                                arcSegments: p.arcSegments || [],
-                                curveIds: p.curveIds || []
-                            }];
-
-                        return this._createPathPrimitive(contours, {
-                            ...p.properties,
-                            hasReconstructableCurves: p.hasReconstructableCurves
-                        });
-                    }
-                    return p;
-                });
+                return result;
 
             } catch (error) {
                 console.error('Difference operation failed:', error);
@@ -387,7 +347,7 @@
         }
 
         // Preprocess primitives with curve ID preservation
-       _preprocessPrimitives(primitives) {
+        _preprocessPrimitives(primitives) {
             const preprocessed = [];
             let strokeCount = 0;
 
@@ -515,28 +475,6 @@
             this.debug(`Received ${primitives.length} total primitives. Separated into: ${darkPrimitives.length} dark (subjects) and ${clearPrimitives.length} clear (clips).`);
             this.debug(`_performFusion Input (Post-Standardization): ${darkPrimitives.length} dark, ${clearPrimitives.length} clear`);
 
-            // Enforce Winding Order *before* Clipper
-            // Outer contours → CCW, hole contours → CW, regardless of dark/clear polarity.
-            // ClipperWrapper also enforces this, but doing it here catches winding issues early.
-            let reversed = 0;
-            const enforceContourWinding = (primitives) => {
-                primitives.forEach(prim => {
-                    if (!prim.contours) return;
-                    prim.contours.forEach(contour => {
-                        if (!contour.points || contour.points.length < 3) return;
-                        const isCW = GeometryUtils.isClockwise(contour.points);
-                        const shouldBeCW = contour.isHole === true;
-                        if (isCW !== shouldBeCW) {
-                            contour.points.reverse();
-                            reversed++;
-                        }
-                    });
-                });
-            };
-            enforceContourWinding(darkPrimitives);
-            enforceContourWinding(clearPrimitives);
-            this.debug(`Pre-Clipper Winding: Reversed ${reversed} contour(s).`);
-
             // Perform Boolean Operation
             const rawResult = await this.clipper.difference(darkPrimitives, clearPrimitives);
             this.debug('Raw Clipper Result Count:', rawResult.length);
@@ -544,26 +482,12 @@
             const directHolesCount = rawResult.filter(p => p && p.contours && p.contours.filter(c => c.isHole).length > 0).length;
             this.debug('Primitives with structured hole contours in raw result:', directHolesCount);
 
-            // Normalize Winding on Clipper Result
-            this.debug(`Normalizing winding for ${rawResult.length} final primitives.`);
-            rawResult.forEach((primitive, index) => {
+            rawResult.forEach(primitive => {
                 // Mark as fused. The wrapper already applied properties.
                 if (primitive.properties) {
                     primitive.properties.isFused = true;
                 } else {
                     primitive.properties = { isFused: true };
-                }
-
-                if (primitive.type === 'path' && primitive.contours && primitive.contours.length > 0) {
-                    primitive.contours.forEach((contour, contourIdx) => {
-                        const pathIsClockwise = GeometryUtils.isClockwise(contour.points);
-                        const expectedClockwise = contour.isHole; // Holes should be CW
-
-                        if (pathIsClockwise !== expectedClockwise) {
-                            this.debug(`  - Reversing contour ${index}:${contourIdx} (isHole=${contour.isHole}). Was ${pathIsClockwise ? 'CW' : 'CCW'}, expected ${expectedClockwise ? 'CW' : 'CCW'}.`);
-                            contour.points.reverse();
-                        }
-                    });
                 }
             });
 

@@ -119,7 +119,6 @@
             }
 
             if (hasRotation) {
-                // When mirrored, negate rotation to preserve visual direction
                 const isMirrored = (this.core.mirrorX ? 1 : 0) ^ (this.core.mirrorY ? 1 : 0);
                 const effectiveAngle = isMirrored ? -this.core.currentRotation : this.core.currentRotation;
 
@@ -135,6 +134,12 @@
                 this._renderVisibleLayers();
             }
 
+            // Debug overlay
+            if ((this.options.debugPoints || this.options.debugArcs) && 
+                this.debugPrimitives.length > 0) {
+                this._renderDebugOverlayWorld();
+            }
+
             this.ctx.restore();
 
             // World-space overlays
@@ -147,13 +152,6 @@
             if (this.options.showRulers) this.overlayRenderer.renderRulers();
             this.overlayRenderer.renderScaleIndicator();
             if (this.options.showStats) this.overlayRenderer.renderStats();
-
-            // Debug overlay
-            if ((this.options.debugPoints || this.options.debugArcs) && 
-                this.debugPrimitives.length > 0) {
-                this._buildDebugScreenData();
-                this._renderDebugOverlay();
-            }
 
             this.core.endRender(startTime);
         }
@@ -759,122 +757,193 @@
             return false;
         }
 
-        _buildDebugScreenData() {
-            this.debugPrimitivesScreen = this.debugPrimitives.map(prim => {
-                const screenData = {
-                    type: prim.type,
-                    properties: prim.properties,
-                    center: prim.center,
-                    radius: prim.radius,
-                    startAngle: prim.startAngle,
-                    endAngle: prim.endAngle,
-                    clockwise: prim.clockwise
-                };
+        // ========================================================================
+        // Debug Overlay — World Space (same transform as geometry)
+        // ========================================================================
 
-                if (prim.points) {
-                    screenData.screenPoints = prim.points.map(p => {
-                        const s = this.core.worldToScreen(p.x, p.y);
-                        return { ...s, ...p };
-                    });
-                }
+        /**
+         * Renders debug points and arcs in world space (same transform as geometry).
+         *
+         * Toggle cascade:
+         *   debugPoints ─── shows all vertex dots (source + offset geometry)
+         *     └─ enableArcReconstruction ON → hides points replaced by arcSegments/circles
+         *   debugArcs ──── requires enableArcReconstruction ON
+         *     └─ draws reconstructed arcSegments + full circles + arc center dots
+         *
+         * Batching: single beginPath/fill for all points, single beginPath/stroke for arcs.
+         * Viewport culling: individual regenerated points are skipped if outside view bounds.
+         */
+        _renderDebugOverlayWorld() {
+            const fc = this.core.frameCache;
+            const uiScale = this.core.devicePixelRatio || 1;
+            const pointSize = 3 * fc.invScale * uiScale;
+            const halfPoint = pointSize;
+            const pointDiameter = pointSize * 2;
+            const arcStrokeWidth = 2 * fc.invScale * uiScale;
+            const hasReconstruction = this.options.enableArcReconstruction;
+            const vb = fc.viewBounds;
 
-                if (prim.contours) {
-                    screenData.contours = prim.contours.map(c => ({
-                        ...c,
-                        screenPoints: c.points.map(p => this.core.worldToScreen(p.x, p.y)),
-                        arcSegments: c.arcSegments ? c.arcSegments.map(seg => ({
-                            ...seg,
-                            centerScreen: this.core.worldToScreen(seg.center.x, seg.center.y),
-                            radiusScreen: seg.radius * this.core.viewScale
-                        })) : []
-                    }));
-                }
-                return screenData;
-            });
-        }
-
-        _renderDebugOverlay() {
-            if (!this.debugPrimitivesScreen || this.debugPrimitivesScreen.length === 0) return;
-
-            this.ctx.save();
-            this.ctx.setTransform(1, 0, 0, 1, 0, 0);
-
-            const pointColor = this.core.colors.debug.points;
-            const arcColor = this.core.colors.debug.arcs;
-            const pointSize = 3;
-            const arcStrokeWidth = 2;
-
+            // POINTS
             if (this.options.debugPoints) {
-                this.ctx.fillStyle = pointColor;
+                this.ctx.fillStyle = this.core.colors.debug.points;
+                
+                // Calculate scaling constants once per frame
+                const pointRadius = 1.5 * fc.invScale * uiScale; 
+                
                 this.ctx.beginPath();
 
-                for (const prim of this.debugPrimitivesScreen) {
+                for (const prim of this.debugPrimitives) {
+                    
+                    // 1. Handle Standalone Circles
                     if (prim.type === 'circle' && prim.center) {
-                        const sc = this.core.worldToScreen(prim.center.x, prim.center.y);
-                        this.ctx.moveTo(sc.x + pointSize, sc.y);
-                        this.ctx.arc(sc.x, sc.y, pointSize, 0, Math.PI * 2);
+                        if (hasReconstruction && prim.properties?.reconstructed) continue;
+                        
+                        if (!hasReconstruction && prim.properties?.reconstructed) {
+                            const segments = GeometryUtils.getOptimalSegments(prim.radius, 'circle');
+                            const step = (2 * Math.PI) / segments;
+                            for (let s = 0; s < segments; s++) {
+                                const angle = s * step;
+                                const px = prim.center.x + prim.radius * Math.cos(angle);
+                                const py = prim.center.y + prim.radius * Math.sin(angle);
+                                
+                                if (px < vb.minX || px > vb.maxX || py < vb.minY || py > vb.maxY) continue;
+                                
+                                // Draw perfectly round dot
+                                this.ctx.moveTo(px + pointRadius, py);
+                                this.ctx.arc(px, py, pointRadius, 0, Math.PI * 2);
+                            }
+                            continue;
+                        }
+
+                        if (prim.center.x >= vb.minX && prim.center.x <= vb.maxX && 
+                            prim.center.y >= vb.minY && prim.center.y <= vb.maxY) {
+                            this.ctx.moveTo(prim.center.x + pointRadius, prim.center.y);
+                            this.ctx.arc(prim.center.x, prim.center.y, pointRadius, 0, Math.PI * 2);
+                        }
+                        continue;
                     }
 
-                    if (prim.contours) {
-                        for (const contour of prim.contours) {
-                            if (contour.screenPoints) {
-                                for (const p of contour.screenPoints) {
-                                    this.ctx.moveTo(p.x + pointSize, p.y);
-                                    this.ctx.arc(p.x, p.y, pointSize, 0, Math.PI * 2);
+                    // 2. Handle Paths and Offset Geometry
+                    if (!prim.contours) continue;
+
+                    for (const contour of prim.contours) {
+                        if (!contour.points) continue;
+
+                        const arcs = contour.arcSegments || [];
+                        const hasArcs = arcs.length > 0;
+
+                        // Draw existing points in memory
+                        for (let i = 0; i < contour.points.length; i++) {
+                            const p = contour.points[i];
+                            if (p.x < vb.minX || p.x > vb.maxX || p.y < vb.minY || p.y > vb.maxY) continue;
+                            
+                            this.ctx.moveTo(p.x + pointRadius, p.y);
+                            this.ctx.arc(p.x, p.y, pointRadius, 0, Math.PI * 2);
+                        }
+
+                        // Regenerate missing points
+                        if (!hasReconstruction && hasArcs) {
+                            for (const arc of arcs) {
+                                if (!arc.center || !arc.radius) continue;
+
+                                let sweep = arc.sweepAngle;
+                                if (sweep === undefined) {
+                                    sweep = arc.endAngle - arc.startAngle;
+                                    if (arc.clockwise && sweep > 0) sweep -= 2 * Math.PI;
+                                    else if (!arc.clockwise && sweep < 0) sweep += 2 * Math.PI;
                                 }
-                            }
-                            if (contour.arcSegments) {
-                                for (const arc of contour.arcSegments) {
-                                    if (arc.centerScreen) {
-                                        this.ctx.moveTo(arc.centerScreen.x + pointSize, arc.centerScreen.y);
-                                        this.ctx.arc(arc.centerScreen.x, arc.centerScreen.y, pointSize, 0, Math.PI * 2);
-                                    }
+
+                                const fullCircleSegs = GeometryUtils.getOptimalSegments(arc.radius, 'arc');
+                                const arcSegs = Math.max(2, Math.ceil(fullCircleSegs * Math.abs(sweep) / (2 * Math.PI)));
+
+                                for (let s = 1; s < arcSegs; s++) {
+                                    const t = s / arcSegs;
+                                    const angle = arc.startAngle + sweep * t;
+                                    const px = arc.center.x + arc.radius * Math.cos(angle);
+                                    const py = arc.center.y + arc.radius * Math.sin(angle);
+                                    
+                                    if (px < vb.minX || px > vb.maxX || py < vb.minY || py > vb.maxY) continue;
+                                    
+                                    this.ctx.moveTo(px + pointRadius, py);
+                                    this.ctx.arc(px, py, pointRadius, 0, Math.PI * 2);
                                 }
                             }
                         }
                     }
                 }
-                this.ctx.fill();
+                
+                // Send all points to GPU in a single call
+                this.ctx.fill(); 
             }
 
-            if (this.options.debugArcs) {
+            // ARCS
+            if (this.options.debugArcs && hasReconstruction) {
+                const arcColor = this.core.colors.debug.arcs;
                 this.ctx.strokeStyle = arcColor;
                 this.ctx.lineWidth = arcStrokeWidth;
-                this.ctx.beginPath();
+                this.ctx.setLineDash([]);
 
-                for (const prim of this.debugPrimitivesScreen) {
+                this.ctx.beginPath();
+                for (const prim of this.debugPrimitives) {
                     if (!prim.contours) continue;
                     for (const contour of prim.contours) {
                         if (!contour.arcSegments) continue;
                         for (const arc of contour.arcSegments) {
-                            if (!arc.centerScreen) continue;
+                            if (!arc.center) continue;
                             this.ctx.moveTo(
-                                arc.centerScreen.x + arc.radiusScreen * Math.cos(arc.startAngle),
-                                arc.centerScreen.y - arc.radiusScreen * Math.sin(arc.startAngle)
+                                arc.center.x + arc.radius * Math.cos(arc.startAngle),
+                                arc.center.y + arc.radius * Math.sin(arc.startAngle)
                             );
-                            this.ctx.arc(
-                                arc.centerScreen.x, arc.centerScreen.y, arc.radiusScreen,
-                                -arc.startAngle, -arc.endAngle, arc.clockwise
-                            );
+                            if (arc.sweepAngle !== undefined) {
+                                this.ctx.arc(
+                                    arc.center.x, arc.center.y, arc.radius,
+                                    arc.startAngle, arc.startAngle + arc.sweepAngle,
+                                    arc.sweepAngle < 0
+                                );
+                            } else {
+                                this.ctx.arc(
+                                    arc.center.x, arc.center.y, arc.radius,
+                                    arc.startAngle, arc.endAngle, arc.clockwise
+                                );
+                            }
                         }
                     }
                 }
                 this.ctx.stroke();
 
-                // Reconstructed full circles
+                // Full reconstructed circles
                 this.ctx.beginPath();
-                for (const prim of this.debugPrimitivesScreen) {
+                for (const prim of this.debugPrimitives) {
                     if (prim.type === 'circle' && prim.properties?.reconstructed) {
-                        const sc = this.core.worldToScreen(prim.center.x, prim.center.y);
-                        const sr = prim.radius * this.core.viewScale;
-                        this.ctx.moveTo(sc.x + sr, sc.y);
-                        this.ctx.arc(sc.x, sc.y, sr, 0, Math.PI * 2);
+                        this.ctx.moveTo(prim.center.x + prim.radius, prim.center.y);
+                        this.ctx.arc(prim.center.x, prim.center.y, prim.radius, 0, Math.PI * 2);
                     }
                 }
                 this.ctx.stroke();
-            }
 
-            this.ctx.restore();
+                // Arc center dots
+                this.ctx.fillStyle = arcColor;
+                this.ctx.beginPath(); // Start batch for arc centers
+
+                // Use the exact same radius calculation as the debug points
+                const arcCenterRadius = 1.5 * fc.invScale * uiScale;
+
+                for (const prim of this.debugPrimitives) {
+                    if (!prim.contours) continue;
+                    for (const contour of prim.contours) {
+                        if (!contour.arcSegments) continue;
+                        for (const arc of contour.arcSegments) {
+                            if (!arc.center) continue;
+                            
+                            // Draw perfectly round dot
+                            this.ctx.moveTo(arc.center.x + arcCenterRadius, arc.center.y);
+                            this.ctx.arc(arc.center.x, arc.center.y, arcCenterRadius, 0, Math.PI * 2);
+                        }
+                    }
+                }
+
+                this.ctx.fill();
+            }
         }
 
         // ========================================================================

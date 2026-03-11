@@ -110,9 +110,8 @@
                     };
                     
                     if (!item.start || !item.end) {
-                         // Handle hole type which may only have 'position' if old parser version was used
-                         item.start = item.position || { x: 0, y: 0 };
-                         item.end = item.position || { x: 0, y: 0 };
+                        item.start = { ...(item.position || { x: 0, y: 0 }) };
+                        item.end = { ...(item.position || { x: 0, y: 0 }) };
                     }
 
                     // Calculate distance between start and end
@@ -202,11 +201,11 @@
             if (!analyticSubpaths || analyticSubpaths.length === 0) {
                 if (region.points && region.points.length > 0) {
 
-                    // Winding normalization for Gerber fallbacks
+                    // Outer contours must be CCW (positive winding area)
                     const isCW = GeometryUtils.isClockwise(region.points);
-                    if (!isCW) {
+                    if (isCW) {
                         region.points.reverse();
-                        this.debug(`Normalized Gerber fallback region to CW.`);
+                        this.debug(`Normalized Gerber fallback region to CCW (outer).`);
                     }
 
                     const contour = {
@@ -245,13 +244,15 @@
 
                 // Handle simple point arrays (from polygon/polyline)
                 if (segments.length > 0 && segments[0].x !== undefined) {
-                    // This is a simple point array, treat as one contour
+                    // Determine hole status from winding: in Y-up, CCW = positive area = outer
                     const isCW = GeometryUtils.isClockwise(segments);
-                    const isHole = (analyticSubpaths.length > 1) ? !isCW : false;
-                    const finalPolarity = (analyticSubpaths.length > 1) ? (isCW ? 'dark' : 'clear') : 'dark';
+                    const isHole = (analyticSubpaths.length > 1) ? isCW : false;
 
-                    if ((finalPolarity === 'dark' && !isCW) || (finalPolarity === 'clear' && isCW)) {
-                        segments.reverse(); // Normalize winding
+                    // Enforce: outer=CCW, hole=CW
+                    if (!isHole && isCW) {
+                        segments.reverse();
+                    } else if (isHole && !isCW) {
+                        segments.reverse();
                     }
 
                     contours.push({
@@ -360,38 +361,34 @@
                 if (points.length > 0) {
 
                     let isCW = GeometryUtils.isClockwise(points);
-                    let finalPolarity;
                     let isHole;
 
                     if (analyticSubpaths.length > 1) {
-                        // Compound path (e.g., an "O"): Trust the winding
-                        isHole = !isCW;
-                        finalPolarity = isCW ? 'dark' : 'clear';
+                        // Compound path: CW = hole (negative area in Y-up)
+                        isHole = isCW;
                     } else {
-                        // Single path (e.g., a "C"): Is always an outer perimeter.
                         isHole = false;
-                        finalPolarity = 'dark';
                     }
 
-                    // Normalization step - enforce winding
-                    if (finalPolarity === 'dark' && !isCW) {
-                        points.reverse();
-                        isCW = true;
-                        this.debug(`Normalizing standalone path to CW (dark).`);
-                    } else if (finalPolarity === 'clear' && isCW) {
+                    // Enforce: outer=CCW, hole=CW
+                    if (!isHole && isCW) {
                         points.reverse();
                         isCW = false;
-                        this.debug(`Normalizing hole path to CCW (clear).`);
+                        this.debug(`Normalized outer contour to CCW.`);
+                    } else if (isHole && !isCW) {
+                        points.reverse();
+                        isCW = true;
+                        this.debug(`Normalized hole contour to CW.`);
                     }
 
-                    this.debug(`Processed subpath #${subpathIndex} (of ${analyticSubpaths.length}): ${points.length} pts. Winding: ${isCW ? 'CW' : 'CCW'}. Polarity set to: ${finalPolarity}. Set as: ${isHole ? 'HOLE' : 'OUTER'}`);
+                    this.debug(`Processed subpath #${subpathIndex} (of ${analyticSubpaths.length}): ${points.length} pts. Winding: ${isCW ? 'CW' : 'CCW'}. isHole: ${isHole}.`);
 
                     // Add finished subpath as a contour
                     contours.push({
                         points: points,
                         isHole: isHole,
-                        nestingLevel: isHole ? 1 : 0, // Simple nesting // Review - data structure can handle more, but better to limit hierarchy levels?
-                        parentId: isHole ? 0 : null,  // Assume nested in first contour
+                        nestingLevel: isHole ? 1 : 0,
+                        parentId: isHole ? 0 : null,
                         arcSegments: arcSegments,
                         curveIds: arcSegments.map(a => a.curveId).filter(Boolean)
                     });
@@ -476,13 +473,9 @@
                         trace.end.x - center.x
                     );
 
-                    // Gerber uses Y-up coordinates, renderer expects Y-down after transform
-                    // The scale(1, -1) in renderer-core.js flips Y, which inverts arc direction
-                    // This pre-inversion ensures arcs render correctly after Y-flip
-                    const gerberClockwise = trace.interpolation === 'cw_arc' || 
-                                             trace.clockwise === true;
-                    
-                    const clockwise = !gerberClockwise;
+                    // Data model is strictly Y-Up (Mathematical Cartesian).
+                    // Do NOT pre-invert here. The renderer's matrix handles visual flipping.
+                    const clockwise = trace.interpolation === 'cw_arc' || trace.clockwise === true;
 
                     this.creationStats.arcTraces++;
                     return new ArcPrimitive(

@@ -126,6 +126,9 @@
             const points = [];
             const arcSegments = [];
 
+            const isHole = primitive.properties?.polarity === 'clear';
+            const directionMult = isHole ? -1 : 1; // CW for holes (-1), CCW for outers (+1) in Y-up
+
             // Register circle curve
             let curveId = null;
             if (window.globalCurveRegistry) {
@@ -133,15 +136,16 @@
                     type: 'circle',
                     center: { x: primitive.center.x, y: primitive.center.y },
                     radius: primitive.radius,
-                    clockwise: false,
+                    clockwise: isHole,
                     source: 'circle_to_path'
                 });
             }
 
-            // Generate CCW points with arc metadata for each edge
+            // Generate points natively in correct winding
             for (let i = 0; i < segments; i++) {
-                const angle = (i / segments) * 2 * Math.PI;
-                const nextAngle = ((i + 1) % segments / segments) * 2 * Math.PI;
+                // Base 2*PI prevents negative angle wrap issues
+                const angle = (2 * Math.PI + (directionMult * (i / segments) * 2 * Math.PI)) % (2 * Math.PI);
+                const nextAngle = (2 * Math.PI + (directionMult * ((i + 1) % segments / segments) * 2 * Math.PI)) % (2 * Math.PI);
 
                 points.push({
                     x: primitive.center.x + primitive.radius * Math.cos(angle),
@@ -152,7 +156,6 @@
                     t: i / segments
                 });
 
-                // Each edge is an arc segment
                 arcSegments.push({
                     startIndex: i,
                     endIndex: (i + 1) % segments,
@@ -160,7 +163,7 @@
                     radius: primitive.radius,
                     startAngle: angle,
                     endAngle: nextAngle,
-                    clockwise: false,
+                    clockwise: isHole,
                     curveId: curveId
                 });
             }
@@ -222,95 +225,97 @@
 
             const capSegs = Math.max(8, Math.floor(this.getOptimalSegments(r, 'arc') / 2));
 
+            const isHole = primitive.properties?.polarity === 'clear';
+
             if (isHorizontal) {
-                // Start top-left, go CCW
-                // Top edge (linear)
-                points.push({ x: x + r, y: y + h });
-                points.push({ x: x + w - r, y: y + h });
+                if (isHole) {
+                    // CW (Hole)
+                    points.push({ x: x + r, y: y + h });
+                    points.push({ x: x + w - r, y: y + h });
 
-                // Right cap (top to bottom)
-                const cap2Start = points.length - 1;
-                for (let i = 1; i <= capSegs; i++) {
-                    const angle = Math.PI / 2 - (Math.PI * i / capSegs);
-                    points.push({
-                        x: cap2Center.x + r * Math.cos(angle),
-                        y: cap2Center.y + r * Math.sin(angle),
-                        curveId: cap2Id
-                    });
+                    const cap2Start = points.length - 1;
+                    for (let i = 1; i <= capSegs; i++) {
+                        const angle = Math.PI / 2 - (Math.PI * i / capSegs);
+                        points.push({ x: cap2Center.x + r * Math.cos(angle), y: cap2Center.y + r * Math.sin(angle), curveId: cap2Id });
+                    }
+                    arcSegments.push({ startIndex: cap2Start, endIndex: points.length - 1, center: cap2Center, radius: r, startAngle: Math.PI / 2, endAngle: -Math.PI / 2, clockwise: true, curveId: cap2Id });
+
+                    points.push({ x: x + r, y: y });
+
+                    const cap1Start = points.length - 1;
+                    for (let i = 1; i < capSegs; i++) {
+                        const angle = -Math.PI / 2 - (Math.PI * i / capSegs);
+                        points.push({ x: cap1Center.x + r * Math.cos(angle), y: cap1Center.y + r * Math.sin(angle), curveId: cap1Id });
+                    }
+                    arcSegments.push({ startIndex: cap1Start, endIndex: 0, center: cap1Center, radius: r, startAngle: -Math.PI / 2, endAngle: -3 * Math.PI / 2, clockwise: true, curveId: cap1Id });
+                } else {
+                    // CCW (Outer)
+                    points.push({ x: x + r, y: y });
+                    points.push({ x: x + w - r, y: y });
+
+                    const cap2Start = points.length - 1;
+                    for (let i = 1; i <= capSegs; i++) {
+                        const angle = -Math.PI / 2 + (Math.PI * i / capSegs);
+                        points.push({ x: cap2Center.x + r * Math.cos(angle), y: cap2Center.y + r * Math.sin(angle), curveId: cap2Id });
+                    }
+                    arcSegments.push({ startIndex: cap2Start, endIndex: points.length - 1, center: cap2Center, radius: r, startAngle: -Math.PI / 2, endAngle: Math.PI / 2, clockwise: false, curveId: cap2Id });
+
+                    points.push({ x: x + r, y: y + h });
+
+                    const cap1Start = points.length - 1;
+                    for (let i = 1; i < capSegs; i++) {
+                        const angle = Math.PI / 2 + (Math.PI * i / capSegs);
+                        points.push({ x: cap1Center.x + r * Math.cos(angle), y: cap1Center.y + r * Math.sin(angle), curveId: cap1Id });
+                    }
+                    arcSegments.push({ startIndex: cap1Start, endIndex: 0, center: cap1Center, radius: r, startAngle: Math.PI / 2, endAngle: 3 * Math.PI / 2, clockwise: false, curveId: cap1Id });
                 }
-                arcSegments.push({
-                    startIndex: cap2Start, endIndex: points.length - 1,
-                    center: cap2Center, radius: r,
-                    startAngle: Math.PI / 2, endAngle: -Math.PI / 2,
-                    clockwise: true, curveId: cap2Id
-                });
-
-                // Bottom edge (linear)
-                points.push({ x: x + r, y: y });
-
-                // Left cap (bottom to top)
-                const cap1Start = points.length - 1;
-                for (let i = 1; i < capSegs; i++) {
-                    const angle = -Math.PI / 2 - (Math.PI * i / capSegs);
-                    points.push({
-                        x: cap1Center.x + r * Math.cos(angle),
-                        y: cap1Center.y + r * Math.sin(angle),
-                        curveId: cap1Id
-                    });
-                }
-                arcSegments.push({
-                    startIndex: cap1Start, endIndex: 0,
-                    center: cap1Center, radius: r,
-                    startAngle: -Math.PI / 2, endAngle: Math.PI / 2,
-                    clockwise: true, curveId: cap1Id
-                });
-
             } else {
-                // Vertical obround - start left-bottom, go CCW
-                points.push({ x: x, y: y + r });
-                points.push({ x: x, y: y + h - r });
+                if (isHole) {
+                    // CW (Hole)
+                    points.push({ x: x, y: y + r });
+                    points.push({ x: x, y: y + h - r });
 
-                // Top cap
-                const cap2Start = points.length - 1;
-                for (let i = 1; i <= capSegs; i++) {
-                    const angle = Math.PI - (Math.PI * i / capSegs);
-                    points.push({
-                        x: cap2Center.x + r * Math.cos(angle),
-                        y: cap2Center.y + r * Math.sin(angle),
-                        curveId: cap2Id
-                    });
+                    const cap2Start = points.length - 1;
+                    for (let i = 1; i <= capSegs; i++) {
+                        const angle = Math.PI - (Math.PI * i / capSegs);
+                        points.push({ x: cap2Center.x + r * Math.cos(angle), y: cap2Center.y + r * Math.sin(angle), curveId: cap2Id });
+                    }
+                    arcSegments.push({ startIndex: cap2Start, endIndex: points.length - 1, center: cap2Center, radius: r, startAngle: Math.PI, endAngle: 0, clockwise: true, curveId: cap2Id });
+
+                    points.push({ x: x + w, y: y + r });
+
+                    const cap1Start = points.length - 1;
+                    for (let i = 1; i < capSegs; i++) {
+                        const angle = 0 - (Math.PI * i / capSegs);
+                        points.push({ x: cap1Center.x + r * Math.cos(angle), y: cap1Center.y + r * Math.sin(angle), curveId: cap1Id });
+                    }
+                    arcSegments.push({ startIndex: cap1Start, endIndex: 0, center: cap1Center, radius: r, startAngle: 0, endAngle: -Math.PI, clockwise: true, curveId: cap1Id });
+                } else {
+                    // CCW (Outer)
+                    points.push({ x: x + w, y: y + r });
+                    points.push({ x: x + w, y: y + h - r });
+
+                    const cap2Start = points.length - 1;
+                    for (let i = 1; i <= capSegs; i++) {
+                        const angle = 0 + (Math.PI * i / capSegs);
+                        points.push({ x: cap2Center.x + r * Math.cos(angle), y: cap2Center.y + r * Math.sin(angle), curveId: cap2Id });
+                    }
+                    arcSegments.push({ startIndex: cap2Start, endIndex: points.length - 1, center: cap2Center, radius: r, startAngle: 0, endAngle: Math.PI, clockwise: false, curveId: cap2Id });
+
+                    points.push({ x: x, y: y + r });
+
+                    const cap1Start = points.length - 1;
+                    for (let i = 1; i < capSegs; i++) {
+                        const angle = Math.PI + (Math.PI * i / capSegs);
+                        points.push({ x: cap1Center.x + r * Math.cos(angle), y: cap1Center.y + r * Math.sin(angle), curveId: cap1Id });
+                    }
+                    arcSegments.push({ startIndex: cap1Start, endIndex: 0, center: cap1Center, radius: r, startAngle: Math.PI, endAngle: 3 * Math.PI, clockwise: false, curveId: cap1Id });
                 }
-                arcSegments.push({
-                    startIndex: cap2Start, endIndex: points.length - 1,
-                    center: cap2Center, radius: r,
-                    startAngle: Math.PI, endAngle: 0,
-                    clockwise: true, curveId: cap2Id
-                });
-
-                // Right edge
-                points.push({ x: x + w, y: y + r });
-
-                // Bottom cap
-                const cap1Start = points.length - 1;
-                for (let i = 1; i < capSegs; i++) {
-                    const angle = 0 - (Math.PI * i / capSegs);
-                    points.push({
-                        x: cap1Center.x + r * Math.cos(angle),
-                        y: cap1Center.y + r * Math.sin(angle),
-                        curveId: cap1Id
-                    });
-                }
-                arcSegments.push({
-                    startIndex: cap1Start, endIndex: 0,
-                    center: cap1Center, radius: r,
-                    startAngle: 0, endAngle: Math.PI,
-                    clockwise: true, curveId: cap1Id
-                });
             }
 
             const contour = {
                 points: points,
-                isHole: false,
+                isHole: isHole,
                 nestingLevel: 0,
                 parentId: null,
                 arcSegments: arcSegments,
@@ -325,16 +330,26 @@
             });
         },
 
-        rectangleToPoints(primitive) {
+        rectangleToPoints(primitive, isHole = false) {
             const { x, y } = primitive.position, w = primitive.width, h = primitive.height;
-            // CCW winding for Y-Up
-            const allPoints = [
-                { x: x, y: y },         // Bottom-left
-                { x: x + w, y: y },     // Bottom-right
-                { x: x + w, y: y + h }, // Top-right
-                { x: x, y: y + h },     // Top-left
-            ];
-            return allPoints;
+            // Clipper2 Y-Up Standard:
+            // CCW (Outer): Bottom-Left -> Bottom-Right -> Top-Right -> Top-Left
+            // CW (Hole): Bottom-Left -> Top-Left -> Top-Right -> Bottom-Right
+            if (isHole) {
+                return [
+                    { x: x, y: y },         // Bottom-left
+                    { x: x, y: y + h },     // Top-left
+                    { x: x + w, y: y + h }, // Top-right
+                    { x: x + w, y: y },     // Bottom-right
+                ];
+            } else {
+                return [
+                    { x: x, y: y },         // Bottom-left
+                    { x: x + w, y: y },     // Bottom-right
+                    { x: x + w, y: y + h }, // Top-right
+                    { x: x, y: y + h },     // Top-left
+                ];
+            }
         },
 
         arcToPoints(primitive) {
@@ -353,9 +368,9 @@
 
             let angleSpan = endAngle - startAngle;
             if (clockwise) {
-                if (angleSpan > 0) angleSpan -= 2 * Math.PI;
+                if (angleSpan > 0) angleSpan -= 2 * Math.PI; // CW = negative sweep in Y-up
             } else {
-                if (angleSpan < 0) angleSpan += 2 * Math.PI;
+                if (angleSpan < 0) angleSpan += 2 * Math.PI; // CCW = positive sweep in Y-up
             }
 
             const segments = this.getOptimalSegments(radius, 'arc');
@@ -461,7 +476,6 @@
             const boundaryStrokes = [];
             const offsetDist = strokeWidth / 2;
             const precision = this.PRECISION || 0.001;
-            const vertexSet = new Set();
 
             if (!points || points.length < 2) return [];
 
@@ -474,38 +488,32 @@
             // 1. Generate Circle Joints
             for (let i = 0; i < points.length; i++) {
                 const pt = points[i];
-                const vKey = `${pt.x.toFixed(4)},${pt.y.toFixed(4)}`;
+                    
+                let curveId = null;
+                if (window.globalCurveRegistry) {
+                    curveId = window.globalCurveRegistry.register({
+                        type: 'circle', center: { x: pt.x, y: pt.y },
+                        radius: offsetDist, clockwise: cleanProps.polarity === 'clear',
+                        source: (i === 0 || i === points.length - 1) ? 'end_cap' : 'trace_joint'
+                    });
+                }
+
+                const circlePrim = {
+                    type: 'circle', center: pt, radius: offsetDist, properties: { ...cleanProps }
+                };
                 
-                if (!vertexSet.has(vKey)) {
-                    vertexSet.add(vKey);
-                    
-                    let curveId = null;
-                    if (window.globalCurveRegistry) {
-                        curveId = window.globalCurveRegistry.register({
-                            type: 'circle', center: { x: pt.x, y: pt.y },
-                            radius: offsetDist, clockwise: false, 
-                            source: (i === 0 || i === points.length - 1) ? 'end_cap' : 'trace_joint'
-                        });
-                    }
+                const circlePath = this.circleToPath(circlePrim);
+                if (circlePath) {
+                    delete circlePath.properties.stroke;
+                    delete circlePath.properties.strokeWidth;
+                    delete circlePath.properties.isTrace;
 
-                    const circlePrim = {
-                        type: 'circle', center: pt, radius: offsetDist, properties: { ...cleanProps }
-                    };
-                    
-                    const circlePath = this.circleToPath(circlePrim);
-                    if (circlePath) {
-                        // EXPLICITLY DELETE RENDERER OFFENDERS
-                        delete circlePath.properties.stroke;
-                        delete circlePath.properties.strokeWidth;
-                        delete circlePath.properties.isTrace;
-
-                        if (curveId && circlePath.contours[0]) {
-                            circlePath.contours[0].curveIds = [curveId];
-                            circlePath.contours[0].points.forEach(p => p.curveId = curveId);
-                            circlePath.contours[0].arcSegments.forEach(arc => arc.curveId = curveId);
-                        }
-                        boundaryStrokes.push(circlePath);
+                    if (curveId && circlePath.contours[0]) {
+                        circlePath.contours[0].curveIds = [curveId];
+                        circlePath.contours[0].points.forEach(p => p.curveId = curveId);
+                        circlePath.contours[0].arcSegments.forEach(arc => arc.curveId = curveId);
                     }
+                    boundaryStrokes.push(circlePath);
                 }
             }
 
@@ -548,14 +556,23 @@
                 const nx = (-uy) * offsetDist;
                 const ny = (ux) * offsetDist;
 
-                const rectPoints = [
+                const isHole = cleanProps.polarity === 'clear';
+                
+                // Natively assign array order based on winding requirement (CCW for outers, CW for holes in Y-up)
+                const rectPoints = isHole ? [
                     { x: p1.x + nx, y: p1.y + ny },
                     { x: p2.x + nx, y: p2.y + ny },
                     { x: p2.x - nx, y: p2.y - ny },
                     { x: p1.x - nx, y: p1.y - ny }
+                ] : [
+                    { x: p1.x - nx, y: p1.y - ny },
+                    { x: p2.x - nx, y: p2.y - ny },
+                    { x: p2.x + nx, y: p2.y + ny },
+                    { x: p1.x + nx, y: p1.y + ny }
                 ];
+
                 const rectPath = new PathPrimitive([{
-                    points: rectPoints, isHole: false, nestingLevel: 0,
+                    points: rectPoints, isHole: isHole, nestingLevel: 0,
                     parentId: null, arcSegments: [], curveIds: []
                 }], { ...cleanProps });
 
@@ -665,7 +682,6 @@
          */
         closedContourToStrokePolygons(contour, strokeWidth) {
             const boundaryStrokes = [];
-            const vertexSet = new Set();
             const offsetDist = strokeWidth / 2;
             const precision = this.PRECISION || 0.001;
             
@@ -751,24 +767,18 @@
                 if (segLen < precision) continue;
 
                 // Add Vertex Joint (Circle)
-                const vKey = `${p1.x.toFixed(4)},${p1.y.toFixed(4)}`;
-                if (!vertexSet.has(vKey)) {
-                    vertexSet.add(vKey);
-                    const circlePrim = {
-                        type: 'circle',
-                        center: p1,
-                        radius: offsetDist,
-                        properties: { polarity: 'dark', fill: true, closed: true }
-                    };
-                    const circlePath = this.circleToPath(circlePrim);
-                    if (circlePath) {
-                        
-                        // Scrub stroke properties from circles
-                        delete circlePath.properties.stroke;
-                        delete circlePath.properties.strokeWidth;
-                        delete circlePath.properties.isTrace;
-                        boundaryStrokes.push(circlePath);
-                    }
+                const circlePrim = {
+                    type: 'circle',
+                    center: p1,
+                    radius: offsetDist,
+                    properties: { polarity: 'dark', fill: true, closed: true }
+                };
+                const circlePath = this.circleToPath(circlePrim);
+                if (circlePath) {
+                    delete circlePath.properties.stroke;
+                    delete circlePath.properties.strokeWidth;
+                    delete circlePath.properties.isTrace;
+                    boundaryStrokes.push(circlePath);
                 }
 
                 // Add Segment Body
@@ -782,14 +792,16 @@
                     const arcStroke = this.arcToPolygon(mockArc, strokeWidth);
                     if (arcStroke) boundaryStrokes.push(arcStroke);
                 } else {
+                    const isHole = contour.isHole || false;
+                    // Stroke pieces are always solid CCW outers regardless of source contour role
                     const nx = (-dy / segLen) * offsetDist;
                     const ny = (dx / segLen) * offsetDist;
 
                     const rectPoints = [
-                        { x: p1.x + nx, y: p1.y + ny },
-                        { x: p2.x + nx, y: p2.y + ny },
+                        { x: p1.x - nx, y: p1.y - ny },
                         { x: p2.x - nx, y: p2.y - ny },
-                        { x: p1.x - nx, y: p1.y - ny }
+                        { x: p2.x + nx, y: p2.y + ny },
+                        { x: p1.x + nx, y: p1.y + ny }
                     ];
 
                     boundaryStrokes.push(new PathPrimitive([{
@@ -1011,54 +1023,77 @@
             // Generate points and tag them
             const arcSegments = this.getOptimalSegments(arc.radius, 'arc');
 
-            // Calculate angle span correctly based on clockwise flag
+            // Calculate angle span correctly based on clockwise flag (Y-up: CW=negative, CCW=positive)
             let angleSpan = endRad - startRad;
             if (clockwise) { if (angleSpan > 0) angleSpan -= 2 * Math.PI; }
             else { if (angleSpan < 0) angleSpan += 2 * Math.PI; }
 
-            // A. Generate Outer arc points (tag with outerArcId)
             const outerPoints = [];
+            const innerPoints = [];
             for (let i = 0; i <= arcSegments; i++) {
                 const t = i / arcSegments; const angle = startRad + angleSpan * t;
-                outerPoints.push({
-                    x: center.x + outerR * Math.cos(angle), y: center.y + outerR * Math.sin(angle),
-                    curveId: outerArcId, segmentIndex: i, totalSegments: arcSegments + 1, t: t
-                });
+                outerPoints.push({ x: center.x + outerR * Math.cos(angle), y: center.y + outerR * Math.sin(angle), curveId: outerArcId, segmentIndex: i, totalSegments: arcSegments + 1, t: t });
+                innerPoints.push({ x: center.x + innerR * Math.cos(angle), y: center.y + innerR * Math.sin(angle), curveId: innerArcId, segmentIndex: i, totalSegments: arcSegments + 1, t: t });
             }
 
-            // B. Generate End Cap points
-            const endCapPoints = this.generateCompleteRoundedCap(
-                endCapCenter,    // cap center
-                endRad,          // radial angle at arc end
-                halfWidth,       // cap radius
-                clockwise,       // arc direction (not used in current impl, for future)
-                endCapId         // curve registry ID
-            );
+            const isHole = arc.properties?.polarity === 'clear';
+            const arcSegmentsMetadata = [];
 
-            // C. Generate Inner arc points (reversed, tag with innerArcId)
-            const innerPointsReversed = [];
-            for (let i = arcSegments; i >= 0; i--) {
-                const t = i / arcSegments; const angle = startRad + angleSpan * t;
-                innerPointsReversed.push({
-                    x: center.x + innerR * Math.cos(angle), y: center.y + innerR * Math.sin(angle),
-                    curveId: innerArcId, segmentIndex: i, totalSegments: arcSegments + 1, t: t
-                });
+            if (!isHole) {
+                // CCW (Outer) - Standard Traversal
+                points.push(...outerPoints);
+
+                const endCapPoints = this.generateCompleteRoundedCap(endCapCenter, endRad, halfWidth, false, endCapId);
+                points.push(...endCapPoints.slice(1));
+
+                const innerPointsReversed = innerPoints.slice().reverse();
+                points.push(...innerPointsReversed.slice(1));
+
+                const startCapPoints = this.generateCompleteRoundedCap(startCapCenter, startRad + Math.PI, halfWidth, false, startCapId);
+                points.push(...startCapPoints.slice(1));
+
+                // Metadata indices calculation
+                arcSegmentsMetadata.push({ startIndex: 0, endIndex: outerPoints.length - 1, center: center, radius: outerR, startAngle: startRad, endAngle: endRad, clockwise: clockwise, curveId: outerArcId });
+
+                const endCapStart = outerPoints.length - 1;
+                const endCapEnd = endCapStart + endCapPoints.length - 1;
+                arcSegmentsMetadata.push({ startIndex: endCapStart, endIndex: endCapEnd, center: endCapCenter, radius: halfWidth, startAngle: endRad, endAngle: endRad + Math.PI, clockwise: false, curveId: endCapId });
+
+                const innerStart = endCapEnd;
+                const innerEnd = innerStart + innerPointsReversed.length - 1;
+                arcSegmentsMetadata.push({ startIndex: innerStart, endIndex: innerEnd, center: center, radius: innerR, startAngle: endRad, endAngle: startRad, clockwise: !clockwise, curveId: innerArcId });
+
+                const startCapStart = innerEnd;
+                const startCapEnd = startCapStart + startCapPoints.length - 1;
+                arcSegmentsMetadata.push({ startIndex: startCapStart, endIndex: startCapEnd, center: startCapCenter, radius: halfWidth, startAngle: startRad + Math.PI, endAngle: startRad + 2*Math.PI, clockwise: false, curveId: startCapId });
+            } else {
+                // CW (Hole) - Reversed Traversal
+                points.push(...innerPoints);
+
+                const endCapPoints = this.generateCompleteRoundedCap(endCapCenter, endRad + Math.PI, halfWidth, true, endCapId);
+                points.push(...endCapPoints.slice(1));
+
+                const outerPointsReversed = outerPoints.slice().reverse();
+                points.push(...outerPointsReversed.slice(1));
+
+                const startCapPoints = this.generateCompleteRoundedCap(startCapCenter, startRad, halfWidth, true, startCapId);
+                points.push(...startCapPoints.slice(1));
+
+                // Metadata indices calculation
+                arcSegmentsMetadata.push({ startIndex: 0, endIndex: innerPoints.length - 1, center: center, radius: innerR, startAngle: startRad, endAngle: endRad, clockwise: clockwise, curveId: innerArcId });
+
+                const endCapStart = innerPoints.length - 1;
+                const endCapEnd = endCapStart + endCapPoints.length - 1;
+                arcSegmentsMetadata.push({ startIndex: endCapStart, endIndex: endCapEnd, center: endCapCenter, radius: halfWidth, startAngle: endRad + Math.PI, endAngle: endRad, clockwise: true, curveId: endCapId });
+
+                const outerStart = endCapEnd;
+                const outerEnd = outerStart + outerPointsReversed.length - 1;
+                arcSegmentsMetadata.push({ startIndex: outerStart, endIndex: outerEnd, center: center, radius: outerR, startAngle: endRad, endAngle: startRad, clockwise: !clockwise, curveId: outerArcId });
+
+                const startCapStart = outerEnd;
+                const startCapEnd = startCapStart + startCapPoints.length - 1;
+                arcSegmentsMetadata.push({ startIndex: startCapStart, endIndex: startCapEnd, center: startCapCenter, radius: halfWidth, startAngle: startRad, endAngle: startRad - Math.PI, clockwise: true, curveId: startCapId });
             }
-
-            // D. Generate Start Cap points
-            const startCapPoints = this.generateCompleteRoundedCap(
-                startCapCenter,      // cap center
-                startRad + Math.PI,  // start at inner side (radial + 180°)
-                halfWidth,           // cap radius
-                clockwise,           // arc direction (not used in current impl, for future)
-                startCapId           // curve registry ID
-            );
-
-            // E. Assemble final points array
-            points.push(...outerPoints);
-            points.push(...endCapPoints.slice(1)); // Skip first point (matches last outer)
-            points.push(...innerPointsReversed.slice(1)); // Skip first point (matches last end cap)
-            points.push(...startCapPoints.slice(1)); // Skip first point (matches last inner)
 
             // Final check for duplicate closing point
             const first = points[0];
@@ -1066,68 +1101,7 @@
             if (Math.hypot(first.x - last.x, first.y - last.y) < this.PRECISION) {
                 points.pop();
                 this.debug("arcToPolygon removed duplicate closing point.");
-            } else {
-                console.warn("[GeoUtils] arcToPolygon closing points didn't match:", first, last);
-                points.push({...points[0]});
-                console.warn("[GeoUtils] Force-closed polygon.");
             }
-
-            // Create arcSegments metadata for offset pipeline
-            const arcSegmentsMetadata = [];
-
-            // Outer arc segment
-            arcSegmentsMetadata.push({
-                startIndex: 0,
-                endIndex: outerPoints.length - 1,
-                center: center,
-                radius: outerR,
-                startAngle: startRad,
-                endAngle: endRad,
-                clockwise: clockwise,
-                curveId: outerArcId
-            });
-
-            // End cap (semicircle)
-            const endCapStart = outerPoints.length;
-            const endCapEnd = endCapStart + endCapPoints.length - 2;
-            arcSegmentsMetadata.push({
-                startIndex: endCapStart,
-                endIndex: endCapEnd,
-                center: endCapCenter,
-                radius: halfWidth,
-                startAngle: endRad,
-                endAngle: endRad + (clockwise ? -Math.PI : Math.PI),
-                clockwise: clockwise,
-                curveId: endCapId
-            });
-
-            // Inner arc (reversed)
-            const innerStart = endCapEnd + 1;
-            const innerEnd = innerStart + innerPointsReversed.length - 2;
-            arcSegmentsMetadata.push({
-                startIndex: innerStart,
-                endIndex: innerEnd,
-                center: center,
-                radius: innerR,
-                startAngle: endRad,
-                endAngle: startRad,
-                clockwise: !clockwise, // Reversed direction
-                curveId: innerArcId
-            });
-
-            // Start cap (semicircle)
-            const startCapStart = innerEnd + 1;
-            const startCapEnd = startCapStart + startCapPoints.length - 2;
-            arcSegmentsMetadata.push({
-                startIndex: startCapStart,
-                endIndex: startCapEnd,
-                center: startCapCenter,
-                radius: halfWidth,
-                startAngle: startRad + Math.PI,
-                endAngle: startRad + Math.PI + (clockwise ? -Math.PI : Math.PI),
-                clockwise: clockwise,
-                curveId: startCapId
-            });
 
             // Return structured object
             const curveIds = [outerArcId, innerArcId, startCapId, endCapId].filter(Boolean);
@@ -1135,7 +1109,7 @@
 
             const contour = {
                 points: points,
-                isHole: false,
+                isHole: isHole,
                 nestingLevel: 0,
                 parentId: null,
                 arcSegments: arcSegmentsMetadata,
@@ -1161,7 +1135,7 @@
             const gridStep = (2 * Math.PI) / fullSegments;
 
             // Cap sweep: π radians in the parent arc's winding direction
-            const sweepDir = clockwiseArc ? -1 : 1;
+            const sweepDir = clockwiseArc ? -1 : 1; // CW = negative angle progression in Y-up
             const capEndAngle = radialAngle + sweepDir * Math.PI;
 
             // Exact start point (boundary — may not be on grid)
@@ -1340,11 +1314,12 @@
                     return this.obroundToPath(primitive);
 
                 case 'rectangle': {
-                    const points = this.rectangleToPoints(primitive);
+                    const isHole = primitive.properties?.polarity === 'clear';
+                    const points = this.rectangleToPoints(primitive, isHole);
                     if (points.length === 0) return null;
                     return new PathPrimitive([{
                         points: points,
-                        isHole: false,
+                        isHole: isHole,
                         nestingLevel: 0,
                         parentId: null,
                         arcSegments: [],
@@ -1546,314 +1521,285 @@
         },
 
         /**
-         * Merges open segments into a single closed PathPrimitive.
+         * Converts a collection of unorganized, open segments into a single, ordered closed PathPrimitive.
+         * Enforces CCW winding (Y-Up standard for outer boundaries) and guarantees curve metadata is mapped correctly.
          */
         mergeSegmentsIntoClosedPath(segments) {
             if (!segments || segments.length < 2) return null;
-
-            this.debug('Merge input:', segments.map((s, i) => 
-                    `[${i}] ${s.type} ${s.startPoint ? `(${s.startPoint.x.toFixed(1)},${s.startPoint.y.toFixed(1)})→(${s.endPoint.x.toFixed(1)},${s.endPoint.y.toFixed(1)})` : ''}`
-                ).join(', '));
-
             const precision = geomConfig.coordinatePrecision || 0.001;
 
-            // Build adjacency graph
-            const graph = this.buildSegmentGraph(segments);
+            this.debug('Merge input:', segments.map((s, i) => `[${i}] ${s.type}`).join(', '));
 
-            // Find Eulerian path (if exists)
-            const orderedSegments = this.findClosedPath(graph, segments);
-
-            if (!orderedSegments || orderedSegments.length !== segments.length) {
-                console.warn('[GeoUtils] Failed to create closed path from segments');
-                return null;
-            }
-
-            // Build final PathPrimitive with correct arc indices
-            return this.assembleClosedPath(orderedSegments, precision);
-        },
-
-        /**
-         * Helper for mergeSegmentsIntoClosedPath.
-         */
-        buildSegmentGraph(segments) {
-            const getEndpoints = (prim) => {
-                if (prim.type === 'arc') {
-                    return { start: prim.startPoint, end: prim.endPoint };
+            // ==========================================
+            // PHASE 1: NORMALIZE ENDPOINTS
+            // ==========================================
+            const edges = segments.map((seg, i) => {
+                let start, end;
+                if (seg.type === 'arc') {
+                    start = seg.startPoint;
+                    end = seg.endPoint;
+                } else if (seg.type === 'path') {
+                    const pts = seg.contours[0].points;
+                    start = pts[0];
+                    end = pts[pts.length - 1];
                 }
-                if (prim.type === 'path' && prim.contours && prim.contours[0]?.points?.length >= 2) {
-                    const points = prim.contours[0].points;
-                    return { 
-                        start: points[0], 
-                        end: points[points.length - 1] 
-                    };
-                }
-                return null;
-            };
+                return { index: i, segment: seg, start, end, used: false };
+            }).filter(e => e.start && e.end);
 
-            const keyPrecision = geomConfig.edgeKeyPrecision || 3;
-            const pointKey = (p) => {
-                return `${p.x.toFixed(keyPrecision)},${p.y.toFixed(keyPrecision)}`;
-            };
+            if (edges.length === 0) return null;
 
-            const graph = new Map();
+            // ==========================================
+            // PHASE 2: GREEDY CHAINING (Robust Distance Matching)
+            // ==========================================
+            const chain = [];
+            edges[0].used = true;
+            chain.push({ edge: edges[0], dir: 'forward' });
+            
+            let head = edges[0].start; // Front of the chain
+            let tail = edges[0].end;   // End of the chain
 
-            segments.forEach((seg, idx) => {
-                const endpoints = getEndpoints(seg);
-                if (!endpoints) return;
-
-                const startKey = pointKey(endpoints.start);
-                const endKey = pointKey(endpoints.end);
-
-                // Add forward connection
-                if (!graph.has(startKey)) graph.set(startKey, []);
-                graph.get(startKey).push({
-                    segmentIndex: idx,
-                    direction: 'forward',
-                    nextPoint: endpoints.end
-                });
-
-                // Add reverse connection
-                if (!graph.has(endKey)) graph.set(endKey, []);
-                graph.get(endKey).push({
-                    segmentIndex: idx,
-                    direction: 'reverse',
-                    nextPoint: endpoints.start
-                });
-            });
-
-            return graph;
-        },
-
-        /**
-         * Helper for mergeSegmentsIntoClosedPath.
-         */
-        findClosedPath(graph, segments) {
-            const keyPrecision = geomConfig.edgeKeyPrecision || 3;
-            const pointKey = (p) => `${p.x.toFixed(keyPrecision)},${p.y.toFixed(keyPrecision)}`;
-
-            // Find starting point
-            let startKey = null;
-            for (const [key, connections] of graph.entries()) {
-                if (connections.length > 0) {
-                    startKey = key;
-                    break;
-                }
-            }
-
-            if (!startKey) return null;
-
-            const used = new Set();
-            const path = [];
-            let currentKey = startKey;
-
-            while (path.length < segments.length) {
-                const connections = graph.get(currentKey);
-                if (!connections) break;
-
-                // Find unused connection
-                let found = false;
-                for (const conn of connections) {
-                    if (!used.has(conn.segmentIndex)) {
-                        used.add(conn.segmentIndex);
-
-                        // Store segment with direction info
-                        path.push({
-                            segment: segments[conn.segmentIndex],
-                            direction: conn.direction,
-                            originalIndex: conn.segmentIndex
-                        });
-
-                        currentKey = pointKey(conn.nextPoint);
-                        found = true;
-                        break;
-                    }
-                }
-
-                if (!found) break;
-            }
-
-            // Verify closed loop
-            if (path.length === segments.length) {
-                const firstStart = this.getSegmentStart(path[0].segment, path[0].direction);
-                const lastEnd = this.getSegmentEnd(path[path.length - 1].segment, path[path.length - 1].direction);
+            let added = true;
+            while (added && chain.length < edges.length) {
+                added = false;
                 
-                const precision = geomConfig.coordinatePrecision || 0.001;
-                if (Math.hypot(firstStart.x - lastEnd.x, firstStart.y - lastEnd.y) < precision) {
-                    return path;
+                // 1. Try appending to the tail
+                for (const e of edges) {
+                    if (e.used) continue;
+                    if (Math.hypot(e.start.x - tail.x, e.start.y - tail.y) < precision) {
+                        e.used = true; chain.push({ edge: e, dir: 'forward' }); tail = e.end; added = true; break;
+                    } else if (Math.hypot(e.end.x - tail.x, e.end.y - tail.y) < precision) {
+                        e.used = true; chain.push({ edge: e, dir: 'reverse' }); tail = e.start; added = true; break;
+                    }
+                }
+                if (added) continue;
+
+                // 2. Try prepending to the head (if tail gets stuck)
+                for (const e of edges) {
+                    if (e.used) continue;
+                    if (Math.hypot(e.end.x - head.x, e.end.y - head.y) < precision) {
+                        e.used = true; chain.unshift({ edge: e, dir: 'forward' }); head = e.start; added = true; break;
+                    } else if (Math.hypot(e.start.x - head.x, e.start.y - head.y) < precision) {
+                        e.used = true; chain.unshift({ edge: e, dir: 'reverse' }); head = e.end; added = true; break;
+                    }
                 }
             }
 
-            return null;
-        },
-
-        /**
-         * Helper for mergeSegmentsIntoClosedPath.
-         */
-        getSegmentStart(segment, direction) {
-            if (segment.type === 'arc') {
-                return direction === 'forward' ? segment.startPoint : segment.endPoint;
+            if (chain.length !== edges.length) {
+                console.warn(`[GeoUtils] Stitching failed: chained ${chain.length}/${edges.length} segments.`);
+                return null;
             }
-            if (segment.type === 'path') {
-                const points = segment.contours?.[0]?.points;
-                if (!points || points.length === 0) return null;
-                return direction === 'forward' ? points[0] : points[points.length - 1];
+
+            if (Math.hypot(head.x - tail.x, head.y - tail.y) > precision) {
+                console.warn('[GeoUtils] Stitched segments did not form a closed loop.');
+                return null;
             }
-            return null;
-        },
 
-        /**
-         * Helper for mergeSegmentsIntoClosedPath.
-         */
-        getSegmentEnd(segment, direction) {
-            if (segment.type === 'arc') {
-                return direction === 'forward' ? segment.endPoint : segment.startPoint;
-            }
-            if (segment.type === 'path') {
-                const points = segment.contours?.[0]?.points;
-                if (!points || points.length === 0) return null;
-                return direction === 'forward' ? 
-                    points[points.length - 1] : 
-                    points[0];
-            }
-            return null;
-        },
+            // ==========================================
+            // PHASE 3: POINT ASSEMBLY & METADATA HARVESTING
+            // ==========================================
+            const rawPoints = [];
+            const rawArcs = [];
 
-        /**
-         * Helper for mergeSegmentsIntoClosedPath.
-         */
-        assembleClosedPath(orderedSegments, precision) {
-            this.debug('Stitched order:', orderedSegments.map((seg, i) => 
-                `[${i}] orig[${seg.originalIndex}] ${seg.segment.type} ${seg.direction}`
-            ).join(', '));
+            for (const link of chain) {
+                const seg = link.edge.segment;
+                const dir = link.dir;
 
-            const finalPoints = [];
-            const finalArcSegments = [];
+                if (seg.type === 'arc') {
+                    let sAngle = seg.startAngle;
+                    let eAngle = seg.endAngle;
+                    let isCW = seg.clockwise;
 
-            const firstSeg = orderedSegments[0];
-            const firstStart = this.getSegmentStart(firstSeg.segment, firstSeg.direction);
-            finalPoints.push(firstStart);
-
-            const tempPoints = orderedSegments.map(seg => 
-                this.getSegmentStart(seg.segment, seg.direction)
-            );
-            const pathWinding = GeometryUtils.calculateWinding(tempPoints);
-            const pathIsCCW = pathWinding > 0;
-
-            this.debug(`Path winding: ${pathIsCCW ? 'CCW' : 'CW'} (preserving arc directions)`);
-
-            for (let idx = 0; idx < orderedSegments.length; idx++) {
-                const {segment, direction} = orderedSegments[idx];
-                const currentPointIndex = finalPoints.length - 1;
-
-                if (segment.type === 'arc') {
-                    const arc = segment;
-                    const nextPointIndex = currentPointIndex + 1;
-
-                    let arcClockwise = arc.clockwise;
-                    let arcStartAngle = arc.startAngle;
-                    let arcEndAngle = arc.endAngle;
-                    let arcEndPoint = arc.endPoint;
-
-                    if (direction === 'reverse') {
-                        arcStartAngle = arc.endAngle;
-                        arcEndAngle = arc.startAngle;
-                        arcClockwise = !arc.clockwise;
-                        arcEndPoint = arc.startPoint;
+                    if (dir === 'reverse') {
+                        sAngle = seg.endAngle;
+                        eAngle = seg.startAngle;
+                        isCW = !seg.clockwise;
                     }
 
-                    this.debug(`  Arc ${idx}: ${arcClockwise ? 'CW' : 'CCW'} (direction=${direction})`);
+                    const ptStart = dir === 'forward' ? seg.startPoint : seg.endPoint;
+                    const ptEnd = dir === 'forward' ? seg.endPoint : seg.startPoint;
 
-                    finalPoints.push(arcEndPoint);
+                    if (rawPoints.length === 0) rawPoints.push({ x: ptStart.x, y: ptStart.y });
 
-                    if (isFinite(arc.radius) && arc.radius > 0) {
-                        let sweepAngle = arcEndAngle - arcStartAngle;
+                    const startIdx = rawPoints.length - 1;
 
-                        if (arcClockwise) {
-                            if (sweepAngle > precision) {
-                                sweepAngle -= 2 * Math.PI;
-                            }
-                        } else {
-                            if (sweepAngle < -precision) {
-                                sweepAngle += 2 * Math.PI;
-                            }
-                        }
+                    // Store only the arc endpoint — no tessellation.
+                    // The renderer draws arcs analytically from arcSegment metadata.
+                    // Tessellation for Clipper2 happens on demand via contourArcsToPath().
+                    rawPoints.push({ x: ptEnd.x, y: ptEnd.y });
 
-                        if (Math.abs(sweepAngle) < precision && 
-                            Math.hypot(arc.startPoint.x - arc.endPoint.x, arc.startPoint.y - arc.endPoint.y) < precision) {
-                            sweepAngle = arcClockwise ? -2 * Math.PI : 2 * Math.PI;
-                        }
+                    rawArcs.push({
+                        startIndex: startIdx,
+                        endIndex: rawPoints.length - 1,
+                        center: { x: seg.center.x, y: seg.center.y },
+                        radius: seg.radius,
+                        startAngle: sAngle,
+                        endAngle: eAngle,
+                        clockwise: isCW
+                    });
 
-                        let curveId = null;
-                        if (window.globalCurveRegistry) {
-                            curveId = window.globalCurveRegistry.register({
-                                type: 'arc',
-                                center: arc.center,
-                                radius: arc.radius,
-                                startAngle: arcStartAngle,
-                                endAngle: arcEndAngle,
-                                clockwise: arcClockwise,
-                                source: 'stitched_cutout'
-                            });
-                        }
+                } else if (seg.type === 'path') {
+                    const pts = seg.contours[0].points;
+                    const iterPts = dir === 'forward' ? pts : pts.slice().reverse();
 
-                        finalArcSegments.push({
-                            startIndex: currentPointIndex,
-                            endIndex: nextPointIndex,
-                            center: arc.center,
-                            radius: arc.radius,
-                            startAngle: arcStartAngle,
-                            endAngle: arcEndAngle,
-                            clockwise: arcClockwise,
-                            sweepAngle: sweepAngle,
-                            curveId: curveId
-                        });
-
-                        this.debug(`Arc ${finalArcSegments.length - 1}: ${currentPointIndex}->${nextPointIndex}, r=${arc.radius.toFixed(3)}, sweep=${(sweepAngle * 180 / Math.PI).toFixed(1)}°, ${arcClockwise ? 'CW' : 'CCW'}`);
+                    if (rawPoints.length === 0) rawPoints.push({ x: iterPts[0].x, y: iterPts[0].y });
+                    for (let i = 1; i < iterPts.length; i++) {
+                        rawPoints.push({ x: iterPts[i].x, y: iterPts[i].y });
                     }
-
-                } else if (segment.type === 'path') {
-                    const points = segment.contours?.[0]?.points;
-                    if (!points || points.length === 0) continue;
-
-                    this.debug(`Path segment orig[${orderedSegments[idx].originalIndex}]: ${points.length} points, ${direction}`);
-                    const pathPoints = direction === 'forward' ? 
-                        points.slice(1) : 
-                        points.slice(0, -1).reverse();
-                    finalPoints.push(...pathPoints);
                 }
             }
 
-            const originalEndPointIndex = finalPoints.length - 1;
-            if (originalEndPointIndex > 0 && 
-                Math.hypot(finalPoints[0].x - finalPoints[originalEndPointIndex].x,
-                        finalPoints[0].y - finalPoints[originalEndPointIndex].y) < precision) {
-                finalPoints.pop();
-
-                finalArcSegments.forEach(seg => {
-                    if (seg.endIndex === originalEndPointIndex) seg.endIndex = 0;
-                    if (seg.startIndex === originalEndPointIndex) seg.startIndex = 0;
+            // Cleanup duplicate endpoint
+            const lastIdx = rawPoints.length - 1;
+            if (lastIdx > 0 && Math.hypot(rawPoints[0].x - rawPoints[lastIdx].x, rawPoints[0].y - rawPoints[lastIdx].y) < precision) {
+                rawPoints.pop();
+                rawArcs.forEach(arc => {
+                    if (arc.startIndex === lastIdx) arc.startIndex = 0;
+                    if (arc.endIndex === lastIdx) arc.endIndex = 0;
                 });
             }
 
-            this.debug(`Final path: ${finalPoints.length} points, ${finalArcSegments.length} arcs`);
+            // ==========================================
+            // PHASE 4: WINDING ENFORCEMENT
+            // ==========================================
+            const winding = this.calculateWinding(rawPoints);
+            if (winding < 0) { // CW area -> Reverse array and mirror arcs to make it CCW
+                const n = rawPoints.length;
+                rawPoints.reverse();
+                
+                rawArcs.forEach(arc => {
+                    // Mirror indices to the reversed array
+                    let newStart = (n - 1) - arc.endIndex;
+                    let newEnd = (n - 1) - arc.startIndex;
+                    if (newStart < 0) newStart += n;
+                    if (newEnd < 0) newEnd += n;
 
-            const contour = {
-                points: finalPoints,
+                    arc.startIndex = newStart;
+                    arc.endIndex = newEnd;
+
+                    // Mirror trajectory
+                    const temp = arc.startAngle;
+                    arc.startAngle = arc.endAngle;
+                    arc.endAngle = temp;
+                    arc.clockwise = !arc.clockwise;
+                });
+                this.debug('Stitched path reversed to enforce CCW winding.');
+            }
+
+            // ==========================================
+            // PHASE 5: SWEEP CALCULATION, REGISTRATION & TAGGING
+            // ==========================================
+            const finalArcSegments = [];
+            for (const arc of rawArcs) {
+                let sweep = arc.endAngle - arc.startAngle;
+                while (sweep > Math.PI) sweep -= 2 * Math.PI;
+                while (sweep < -Math.PI) sweep += 2 * Math.PI;
+
+                if (arc.clockwise && sweep > 0) sweep -= 2 * Math.PI;
+                else if (!arc.clockwise && sweep < 0) sweep += 2 * Math.PI;
+
+                arc.sweepAngle = sweep;
+
+                let curveId = null;
+                if (window.globalCurveRegistry) {
+                    curveId = window.globalCurveRegistry.register({
+                        type: 'arc',
+                        center: arc.center,
+                        radius: arc.radius,
+                        startAngle: arc.startAngle,
+                        endAngle: arc.endAngle,
+                        clockwise: arc.clockwise,
+                        source: 'stitched_cutout'
+                    });
+                }
+
+                if (curveId) {
+                    rawPoints[arc.startIndex].curveId = curveId;
+                    rawPoints[arc.startIndex].segmentIndex = 0;
+                    rawPoints[arc.endIndex].curveId = curveId;
+                    rawPoints[arc.endIndex].segmentIndex = 1;
+                }
+
+                finalArcSegments.push({ ...arc, curveId });
+            }
+
+            this.debug(`Merge complete: ${rawPoints.length} points, ${finalArcSegments.length} arcs.`);
+
+            return new PathPrimitive([{
+                points: rawPoints,
                 isHole: false,
                 nestingLevel: 0,
                 parentId: null,
                 arcSegments: finalArcSegments,
                 curveIds: finalArcSegments.map(s => s.curveId).filter(Boolean)
-            };
-
-            return new PathPrimitive([contour], {
+            }], {
                 isCutout: true,
                 fill: true,
                 stroke: false,
                 closed: true,
-                mergedFromSegments: orderedSegments.length,
-                polarity: 'dark'
+                mergedFromSegments: segments.length,
+                polarity: 'dark' // Tells Clipper2 this is a Subject
             });
+        },
+
+        /**
+         * Expands arc segments in a contour into tessellated polyline points.
+         * Returns a new contour with no arc metadata — pure polygon suitable for Clipper2.
+         * The original contour is not modified.
+         */
+        contourArcsToPath(contour) {
+            if (!contour.arcSegments || contour.arcSegments.length === 0) {
+                return contour;
+            }
+
+            const arcMap = new Map();
+            contour.arcSegments.forEach(arc => arcMap.set(arc.startIndex, arc));
+
+            const newPoints = [];
+            let i = 0;
+
+            while (i < contour.points.length) {
+                const arc = arcMap.get(i);
+
+                if (arc) {
+                    // Push the arc start point
+                    newPoints.push(contour.points[i]);
+
+                    // Compute sweep from metadata
+                    let sweep = arc.sweepAngle;
+                    if (sweep === undefined) {
+                        sweep = arc.endAngle - arc.startAngle;
+                        if (arc.clockwise && sweep > 0) sweep -= 2 * Math.PI;
+                        else if (!arc.clockwise && sweep < 0) sweep += 2 * Math.PI;
+                    }
+
+                    // Generate intermediate tessellation points
+                    const segments = this.getOptimalSegments(arc.radius, 'arc');
+                    for (let s = 1; s < segments; s++) {
+                        const angle = arc.startAngle + sweep * (s / segments);
+                        newPoints.push({
+                            x: arc.center.x + arc.radius * Math.cos(angle),
+                            y: arc.center.y + arc.radius * Math.sin(angle)
+                        });
+                    }
+
+                    // Advance to arc endIndex — its point gets pushed on the next iteration
+                    // (or is already point[0] for a wrapping arc)
+                    i = arc.endIndex;
+                    if (i === 0) break; // Wrapping arc — point[0] already in newPoints
+                } else {
+                    newPoints.push(contour.points[i]);
+                    i++;
+                }
+            }
+
+            return {
+                points: newPoints,
+                isHole: contour.isHole,
+                nestingLevel: contour.nestingLevel,
+                parentId: contour.parentId,
+                arcSegments: [],
+                curveIds: contour.curveIds || []
+            };
         },
 
         debug(message, data = null) {

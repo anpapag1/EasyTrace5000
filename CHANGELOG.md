@@ -4,6 +4,18 @@ All notable changes to the **EasyTrace5000** project will be documented in this 
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.0.9] - 2026-03-11
+
+### Fixed
+- **Winding Enforcement:** Winding is now set at the source to avoid having to check and fixing everywhere else.
+- **Further Optimizations:** Removed useless winding checks and enforcements through-out.
+
+### Changed
+- **Spun Off Analytic Offsetting:** Analytic offsets has been stripped into a geometry-analytic and geometry-utils-math modules. Build.js ignores them during deployment.
+- **Optimized Laser SVG File Size:** Moved to relative commands and stripped unnecessary leading and trailing 0's.
+
+- **Known Bugs:** Some KiCAD copper pour regions aren't interacting with other geometry as expected.
+
 ## [1.0.8] - 2026-03-07
 
 ### Notice
@@ -15,10 +27,10 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 ### Fixed
 - **Copper Pour Regions:** KiCAD and Fusion Copper Pour regions are now correctly parsed, plotted and processed in Copper Isolation Operations (Copper Clear works but is even slower).
-- **Clipper Wrapper and Arc Reconstruction Optimizations:** Older modules - newerer logic.
+- **Clipper Wrapper and Arc Reconstruction Optimizations:** Older modules - newish logic.
 
 ### Changed
-- **Removed Analytic Offsets:** Analytic offsets will be developed independently from the live tool. Clipper2 is better at dealing with self-intersection artifacts, for now.
+- **Removed Analytic Offsets:** Analytic offsets will be developed independently from the live tool. Clipper2 deals better with self-intersection artifacts, for now.
 - **Another Attempt At SEO**
 
 ## [1.0.7] - 2026-03-02

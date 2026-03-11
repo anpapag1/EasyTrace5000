@@ -78,7 +78,7 @@
             if (options.format === 'png') {
                 return this._generatePNG(layers, options, renderCtx);
             }
-            return this._generateSVG(layers, options, renderCtx);
+            return this._generateSVG(layers, renderCtx);
         }
 
         /**
@@ -245,23 +245,22 @@
         // SVG Generation
         // ────────────────────────────────────────────────────────────
 
-        async _generateSVG(layers, options, renderCtx) {
+        async _generateSVG(layers, renderCtx) {
             const { mat, widthMm, heightMm } = renderCtx;
             const p = this.PRECISION;
 
             const lines = [];
             lines.push(`<?xml version="1.0" encoding="UTF-8" standalone="no"?>`);
             lines.push(`<svg xmlns="http://www.w3.org/2000/svg" width="${widthMm.toFixed(p)}mm" height="${heightMm.toFixed(p)}mm" viewBox="0 0 ${widthMm.toFixed(p)} ${heightMm.toFixed(p)}" version="1.1">`);
-
-            // Hairline enforcement for browser display.
-            // Laser software (LightBurn, RDWorks) reads XML attributes directly and ignores CSS, so the physical kerf value is preserved.
             lines.push(`<style>path,circle,line{vector-effect:non-scaling-stroke;stroke-width:1px;-inkscape-stroke:hairline}</style>`);
 
-            // Flatten hierarchy when single layer
             const useFlatHierarchy = layers.length === 1;
 
+            // Apply the global matrix transform here (handles origin, rotation, mirror, and Y-flip natively)
+            const transformAttr = `transform="matrix(${mat.a}, ${mat.b}, ${mat.c}, ${mat.d}, ${mat.e}, ${mat.f})"`;
+
             if (!useFlatHierarchy) {
-                lines.push(`<g id="EasyTrace_Export">`);
+                lines.push(`<g id="EasyTrace_Export" ${transformAttr}>`);
             }
 
             for (const layer of layers) {
@@ -269,7 +268,7 @@
                 const layerAttrs = `id="${layerGroupId}" stroke-linecap="round" stroke-linejoin="round"`;
 
                 if (useFlatHierarchy) {
-                    lines.push(`<g ${layerAttrs}>`);
+                    lines.push(`<g ${layerAttrs} ${transformAttr}>`);
                 } else {
                     lines.push(`  <g ${layerAttrs}>`);
                 }
@@ -291,15 +290,14 @@
                         lines.push(`${indent}<g id="${passId}" fill="none" stroke="${color}" stroke-width="${this.HAIRLINE_STROKE}">`);
                     }
 
-                    // Batch path data with pre-transformed coordinates
-                    const pathData = this._buildTransformedPathData(pass.primitives, mat);
+                    // Use the RAW data builders
+                    const pathData = this._buildRawPathData(pass.primitives);
                     if (pathData) {
                         const fillRule = isFilled ? ' fill-rule="evenodd"' : '';
                         lines.push(`${innerIndent}<path d="${pathData}"${fillRule}/>`);
                     }
 
-                    // Circle primitives
-                    this._appendTransformedCircles(lines, pass.primitives, mat, innerIndent);
+                    this._appendRawCircles(lines, pass.primitives, innerIndent);
 
                     lines.push(`${indent}</g>`);
                 }
@@ -403,15 +401,21 @@
         // ────────────────────────────────────────────────────────────
 
         /**
-         * Builds SVG path 'd' attribute with all coordinates pre-transformed.
+         * Formats numbers to strip trailing zeros and leading zeros.
+         * Example: 0.5000 -> .5 | -0.2500 -> -.25 | 10.0000 -> 10
          */
-        _buildTransformedPathData(primitives, mat) {
-            const chunks = [];
-            const p = this.PRECISION;
+        _formatNumber(value, precision) {
+            const s = parseFloat(value.toFixed(precision)).toString();
+            return s.startsWith('0.') ? s.substring(1) : (s.startsWith('-0.') ? '-' + s.substring(2) : s);
+        }
 
-            // Determinant < 0 means the transform includes a reflection (Y-flip, mirror), which reverses the perceived arc sweep direction.
-            const det = mat.a * mat.d - mat.b * mat.c;
-            const scaleFactor = Math.sqrt(mat.a * mat.a + mat.b * mat.b);
+        /**
+         * Builds SVG path 'd' attribute
+         */
+        _buildRawPathData(primitives) {
+            const chunks = [];
+            const prec = this.PRECISION;
+            const fmt = (n) => this._formatNumber(n, prec);
 
             for (const prim of primitives) {
                 if (prim.type === 'circle') continue;
@@ -423,19 +427,33 @@
 
                     const arcMap = this._buildArcMap(contour, prim.arcSegments);
 
-                    const p0 = this._tx(pts[0].x, pts[0].y, mat);
-                    chunks.push(`M${p0.x.toFixed(p)},${p0.y.toFixed(p)}`);
+                    let cx = pts[0].x;
+                    let cy = pts[0].y;
+                    
+                    // Start absolute
+                    let d = `M${fmt(cx)} ${fmt(cy)}`;
+
+                    // Helper to append optimized relative line
+                    const appendRelLine = (tx, ty) => {
+                        const dx = tx - cx;
+                        const dy = ty - cy;
+                        const sDx = fmt(dx);
+                        const sDy = fmt(dy);
+                        // Skip space if the Y value starts with a minus sign
+                        const sep = sDy.startsWith('-') ? '' : ' ';
+                        d += `l${sDx}${sep}${sDy}`;
+                        cx = tx; cy = ty;
+                    };
 
                     let i = 1;
                     while (i < pts.length) {
                         const arc = arcMap.get(i - 1);
 
                         if (arc && arc.endIndex < pts.length && arc.endIndex > i - 1) {
-                            const r = arc.radius * scaleFactor;
+                            const r = arc.radius;
                             const endIdx = arc.endIndex;
-                            const endPt = this._tx(pts[endIdx].x, pts[endIdx].y, mat);
+                            const endPt = pts[endIdx];
 
-                            // Use sweepAngle if available (avoids wrap-around ballooning)
                             let span = arc.sweepAngle;
                             if (span === undefined || span === null) {
                                 span = arc.endAngle - arc.startAngle;
@@ -444,35 +462,32 @@
                             }
 
                             const largeArc = Math.abs(span) > Math.PI ? 1 : 0;
+                            const sweep = arc.clockwise ? 0 : 1;
+                            const sR = fmt(r);
 
-                            // SVG sweep=1 is clockwise in screen coords (Y-down).
-                            // A negative determinant (reflection) flips perceived direction.
-                            let sweep = arc.clockwise ? 1 : 0;
-                            if (det < 0) sweep = 1 - sweep;
-
-                            // Full circle check based on angular span, NOT distance.
-                            // Distance checks falsely trigger on extremely short arcs.
                             if (Math.abs(span) >= Math.PI * 1.99) {
-                                const tc = this._tx(arc.center.x, arc.center.y, mat);
-                                const startPt = this._tx(pts[i - 1].x, pts[i - 1].y, mat);
-                                const mx = 2 * tc.x - startPt.x;
-                                const my = 2 * tc.y - startPt.y;
-                                chunks.push(`A${r.toFixed(p)},${r.toFixed(p)} 0 0 ${sweep} ${mx.toFixed(p)},${my.toFixed(p)}`);
-                                chunks.push(`A${r.toFixed(p)},${r.toFixed(p)} 0 0 ${sweep} ${endPt.x.toFixed(p)},${endPt.y.toFixed(p)}`);
+                                const mx = 2 * arc.center.x - pts[i - 1].x;
+                                const my = 2 * arc.center.y - pts[i - 1].y;
+                                d += `A${sR} ${sR} 0 0 ${sweep} ${fmt(mx)} ${fmt(my)}`;
+                                d += `A${sR} ${sR} 0 0 ${sweep} ${fmt(endPt.x)} ${fmt(endPt.y)}`;
                             } else {
-                                chunks.push(`A${r.toFixed(p)},${r.toFixed(p)} 0 ${largeArc} ${sweep} ${endPt.x.toFixed(p)},${endPt.y.toFixed(p)}`);
+                                // Arcs remain absolute (A), so update tracking coordinates afterward
+                                d += `A${sR} ${sR} 0 ${largeArc} ${sweep} ${fmt(endPt.x)} ${fmt(endPt.y)}`;
                             }
 
+                            cx = endPt.x;
+                            cy = endPt.y;
                             i = endIdx + 1;
                         } else {
-                            const pt = this._tx(pts[i].x, pts[i].y, mat);
-                            chunks.push(`L${pt.x.toFixed(p)},${pt.y.toFixed(p)}`);
+                            appendRelLine(pts[i].x, pts[i].y);
                             i++;
                         }
                     }
 
                     const isClosed = prim.properties?.closed !== false && pts.length > 2;
-                    if (isClosed) chunks.push('Z');
+                    if (isClosed) d += 'Z';
+                    
+                    chunks.push(d);
                 }
             }
 
@@ -480,32 +495,15 @@
         }
 
         /**
-         * Appends pre-transformed <circle> elements.
-         * Note: affine transforms can turn circles into ellipses (under non-uniform scale/mirror).
-         * For uniform scale + rotation + translation, radius is preserved.
-         * If mirror is active on one axis only, output an ellipse check.
+         * Appends raw <circle>
          */
-        _appendTransformedCircles(lines, primitives, mat, indent) {
-            const p = this.PRECISION;
-
-            // Detect if transform includes non-uniform scaling (mirror on one axis) by checking if the scale factors differ
-            const sx = Math.sqrt(mat.a * mat.a + mat.b * mat.b);
-            const sy = Math.sqrt(mat.c * mat.c + mat.d * mat.d);
-            const isUniform = Math.abs(sx - sy) < 0.0001;
+        _appendRawCircles(lines, primitives, indent) {
+            const fmt = (n) => this._formatNumber(n, this.PRECISION);
 
             for (const prim of primitives) {
                 if (prim.type !== 'circle' || !prim.center || !prim.radius) continue;
 
-                const c = this._tx(prim.center.x, prim.center.y, mat);
-
-                if (isUniform) {
-                    const r = prim.radius * sx;
-                    lines.push(`${indent}<circle cx="${c.x.toFixed(p)}" cy="${c.y.toFixed(p)}" r="${r.toFixed(p)}"/>`);
-                } else {
-                    // Non-uniform: output as circle with average scale (acceptable for laser)
-                    const r = prim.radius * ((sx + sy) / 2);
-                    lines.push(`${indent}<circle cx="${c.x.toFixed(p)}" cy="${c.y.toFixed(p)}" r="${r.toFixed(p)}"/>`);
-                }
+                lines.push(`${indent}<circle cx="${fmt(prim.center.x)}" cy="${fmt(prim.center.y)}" r="${fmt(prim.radius)}"/>`);
             }
         }
 
@@ -557,9 +555,12 @@
                             const ea = Math.atan2(tEnd.y * scaleY - tcy, tEnd.x * scaleX - tcx);
 
                             // Canvas arc: counterclockwise param
-                            // Original CW → ccw=false. Reflection flips.
+                            // Baseline: CAM CW (true) -> Canvas CW (false). CAM CCW (false) -> Canvas CCW (true).
                             let ccw = !arc.clockwise;
-                            if (det < 0) ccw = !ccw;
+                            
+                            // Only flip the winding if the user explicitly mirrored the geometry
+                            // (A standard Y-down projection has det < 0. A mirrored one has det > 0)
+                            if (det > 0) ccw = !ccw;
 
                             // Use sweepAngle if available (avoids wrap-around ballooning)
                             let span = arc.sweepAngle;

@@ -864,7 +864,7 @@ window.PCBCAMConfig = {
         tabs: {                                      // [ADDED] For settings in toolpath-geometry-translator.js
             cornerMarginFactor: 2.0,                 // [ADDED] [HARDCODED in toolpath-geometry-translator.js]
             minCornerAngle: 30,                      // [ADDED] [HARDCODED in toolpath-geometry-translator.js]
-            minTabLengthFactor: 1.5
+            minTabLength: 5
         }
     },
     

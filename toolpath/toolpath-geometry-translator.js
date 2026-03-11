@@ -613,7 +613,7 @@
                 end.y,
                 depth,
                 i, j,
-                !isClockwise,
+                isClockwise,
                 feedRate
             );
         }
@@ -697,7 +697,7 @@
                             const flipped = (transforms.mirrorX ? 1 : 0) ^ (transforms.mirrorY ? 1 : 0);
                             if (flipped) clockwise = !clockwise;
                         }
-                        const gcodeClockwise = !clockwise;
+                        const gcodeClockwise = clockwise;
 
                         plan.addArc(endPoint.x, endPoint.y, depth, i_val, j_val, gcodeClockwise, feedRate);
                     } else {

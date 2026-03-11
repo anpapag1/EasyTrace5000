@@ -321,7 +321,18 @@
                 };
             }
 
-            // B. Inverse Translation (Subtract User Origin)
+            // B. Inverse Mirror (Un-mirror the mouse point around mirror center)
+            if (this.core.mirrorX || this.core.mirrorY) {
+                const mc = this.core.mirrorCenter;
+                if (this.core.mirrorX) {
+                    worldPos.x = 2 * mc.x - worldPos.x;
+                }
+                if (this.core.mirrorY) {
+                    worldPos.y = 2 * mc.y - worldPos.y;
+                }
+            }
+
+            // C. Inverse Translation (Subtract User Origin)
             const origin = this.core.getOriginPosition();
             const userX = worldPos.x - origin.x;
             const userY = worldPos.y - origin.y;
