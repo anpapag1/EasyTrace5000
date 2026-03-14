@@ -447,12 +447,12 @@
                         });
 
                         return new PathPrimitive([{
-                            points: offsetResult.points,
+                            points: offsetPoints,
                             isHole: contour.isHole || false,
-                            nestingLevel: 0,
-                            parentId: null,
-                            arcSegments: offsetResult.arcSegments,
-                            curveIds: offsetResult.curveIds
+                            nestingLevel: contour.nestingLevel || 0,
+                            parentId: contour.parentId || null,
+                            arcSegments: [],
+                            curveIds: collectedCurveIds
                         }], makeProps(contour.isHole ? 'clear' : 'dark'));
                     }
                 } catch (e) {
@@ -472,9 +472,9 @@
 
             return new PathPrimitive([{
                 points: offsetPoints,
-                isHole: false,
-                nestingLevel: 0,
-                parentId: null,
+                isHole: contour.isHole || false,
+                nestingLevel: contour.nestingLevel || 0,
+                parentId: contour.parentId || null,
                 arcSegments: [],
                 curveIds: collectedCurveIds
             }], {
@@ -546,14 +546,15 @@
             const offsetSegments = [];
             for (let i = 0; i < n; i++) {
                 const p1 = polygonPoints[i];
-                const p2 = polygonPoints[(i + 1) % n];
+                const p2 = polygonPoints[i === n - 1 ? 0 : i + 1]; // Optimized wrapping
 
-                const v = { x: p2.x - p1.x, y: p2.y - p1.y };
-                const len = Math.hypot(v.x, v.y);
+                const dx = p2.x - p1.x;
+                const dy = p2.y - p1.y;
+                const len = Math.sqrt(dx * dx + dy * dy); // ~4x faster than Math.hypot
                 if (len < this.options.precision) continue;
 
-                const nx = normalDirection * (-v.y / len);
-                const ny = normalDirection * (v.x / len);
+                const nx = normalDirection * (-dy / len);
+                const ny = normalDirection * (dx / len);
 
                 offsetSegments.push({
                     p1: { x: p1.x + nx * offsetDist, y: p1.y + ny * offsetDist },

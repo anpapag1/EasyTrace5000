@@ -37,7 +37,7 @@ window.PCBCAMConfig = {
             name: 'Isolation Routing',
             icon: '🎯',
             extensions: ['.gbr', '.ger', '.gtl', '.gbl', '.gts', '.gbs', '.svg'],
-            defaultTool: 'em_0.1mm_flat',  // Tool ID - diameter comes from tools.json
+            defaultTool: 'em_0.2mm_flat',  // Tool ID - diameter comes from tools.json
             cutting: {
                 cutDepth: -0.04,
                 passDepth: 0.04,
@@ -709,7 +709,7 @@ window.PCBCAMConfig = {
         // Per-operation defaults (merged into operations config)
         operationDefaults: {
             isolation: {
-                isolationWidth: 0.3, // mm — total copper removal width
+                isolationWidth: 0.4, // mm — total copper removal width
                 stepOver: 10, // %
                 clearStrategy: 'offset',
                 hatchAngle: 0

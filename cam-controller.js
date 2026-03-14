@@ -260,7 +260,7 @@
                 this.machineProcessor = new MachineProcessor(this.core);                
 
                 // Initialize UI with core and language manager
-                this.ui = new PCBCamUI(this.core, this.languageManager)
+                this.ui = new PCBCamUI(this.core, this.languageManager);
 
                 // Initialize UI (pass parameter manager)
                 const uiReady = await this.ui.init(this.parameterManager);

@@ -387,6 +387,7 @@
                     p => (p.properties?.polarity || 'dark') === 'clear'
                 );
 
+                // Only run sequential compositing for Eagle files (mixed polarity).
                 if (isCopperLayer && hasMixedPolarity && this.processorInitialized) {
                     this.debug(`[Compositing] Mixed polarity detected in ${operation.file.name}, running sequential compositing...`);
 
@@ -524,23 +525,26 @@
         async compositeByPolarity(primitives) {
             if (!primitives || primitives.length === 0) return [];
 
-            // Quick check: if no clear primitives exist, skip entirely (KiCad, simple files)
-            const hasClear = primitives.some(p => (p.properties?.polarity || 'dark') === 'clear');
-            if (!hasClear) {
-                this.debug('[Compositing] No clear-polarity primitives found, skipping compositing');
-                return primitives;
-            }
-
             await this.ensureProcessorReady();
 
             this.debug(`[Compositing] === SEQUENTIAL COMPOSITING START ===`);
             this.debug(`[Compositing] Input: ${primitives.length} primitives`);
 
-            // Group contiguous same-polarity primitives to batch WASM calls.
+            // Separate traces/pads from regions/clears
+            const independentGeometry = [];
             const polarityGroups = [];
             let currentGroup = null;
 
             for (const prim of primitives) {
+                const isTraceOrPad = prim.properties?.isTrace || prim.properties?.isPad || prim.properties?.isFlash || (prim.properties?.stroke && !prim.properties?.fill);
+                const isClear = prim.properties?.polarity === 'clear';
+
+                // Keep dark traces/pads independent to preserve perfect analytic properties
+                if (isTraceOrPad && !isClear) {
+                    independentGeometry.push(prim);
+                    continue;
+                }
+
                 const polarity = prim.properties?.polarity || 'dark';
                 if (!currentGroup || currentGroup.polarity !== polarity) {
                     currentGroup = { polarity: polarity, items: [] };
@@ -617,7 +621,7 @@
                         // Union the new dark geometry with the accumulator
                         try {
                             accumulator = await this.geometryProcessor.unionGeometry(
-                                [...accumulator, ...groupGeometry]
+                                accumulator.concat(groupGeometry)
                             );
                         } catch (error) {
                             console.error(`[Compositing] Accumulator union failed at group ${i}:`, error);
@@ -652,9 +656,12 @@
             });
 
             this.debug(`[Compositing] === SEQUENTIAL COMPOSITING COMPLETE ===`);
-            this.debug(`[Compositing] Result: ${primitives.length} input → ${accumulator.length} output primitives`);
+            
+            // Re-combine the composited regions with the protected independent geometry
+            const finalResult = [...accumulator, ...independentGeometry];
+            this.debug(`[Compositing] Result: ${primitives.length} input → ${finalResult.length} output primitives`);
 
-            return accumulator;
+            return finalResult;
         }
 
         recalculateBounds(primitives) {
@@ -842,13 +849,17 @@
                     return [];
                 }
 
-                // Copper footprint
-                this.geometryProcessor.clearProcessorCache();
-
-                const footprint = await this.geometryProcessor.fuseGeometry(
-                    operation.primitives,
-                    { enableArcReconstruction: false }
-                );
+                // Copper footprint — skip pre-union so Z metadata (curveIds) survives through a single Clipper2 pass. Clipper2 difference handles overlapping clips internally, making the separate union redundant.
+                const footprint = [];
+                for (const prim of operation.primitives) {
+                    const standardized = this.geometryProcessor.standardizePrimitive(prim, prim.curveIds || []);
+                    if (!standardized) continue;
+                    if (Array.isArray(standardized)) {
+                        footprint.push(...standardized);
+                    } else {
+                        footprint.push(standardized);
+                    }
+                }
 
                 if (footprint.length === 0) {
                     this.debug('Fusion produced no copper footprint');
@@ -1125,180 +1136,71 @@
             // ── PRE-FUSION FOR CLEARING & CUT-IN RESOLUTION ──
             let primitivesToProcess = operation.primitives;
 
-            // Full-board fusion (Restricted to Internal Clearing only)
-            if (isInternal && operation.type === 'clearing' && primitivesToProcess.length > 1) {
-                this.debug(`[Clearing Pre-Fusion] Fusing ${primitivesToProcess.length} clearing primitives...`);
-                this.geometryProcessor.clearProcessorCache();
-
-                try {
-                    const fused = await this.geometryProcessor.fuseGeometry(
-                        primitivesToProcess,
-                        { enableArcReconstruction: false }
-                    );
-
-                    if (fused && fused.length > 0) {
-                        this.debug(`[Clearing Pre-Fusion] ${primitivesToProcess.length} → ${fused.length} primitives`);
-                        fused.forEach(p => {
-                            if (!p.properties) p.properties = {};
-                            p.properties.operationType = operation.type;
-                            p.properties.operationId = operation.id;
-                        });
-                        primitivesToProcess = fused;
-                    }
-                } catch (error) {
-                    console.error(`[Clearing Pre-Fusion] Failed:`, error);
-                }
-            } 
-            // Targeted Cut-In Resolution (For Isolation passes)
-            else if (operation.type === 'isolation') {
-                // Self-union region primitives INDIVIDUALLY. This resolves 0-width cut-in seams  into a clean PolyTree (shell + holes) without merging the entire board and crashing  the Boolean Offsetter with massive monolithic contours.
+            // Targeted Cut-In Resolution (For all Copper Layers)
+            // Resolves KiCad's self-intersecting zero-width cut-ins into topological holes
+            if (operation.type === 'isolation' || operation.type === 'clearing') {
                 const resolvedPrimitives = [];
-                let resolvedCount = 0;
-
                 for (const prim of primitivesToProcess) {
-                    // Filter: Only target filled polygons that aren't traces or simple analytic shapes
-                    const isRegion = prim.type === 'path' && 
-                                     prim.properties?.fill && 
-                                     !prim.properties?.stroke && 
-                                     !prim.properties?.isTrace &&
-                                     !prim.properties?.isComposited;
+                    const isRegion = prim.type === 'path' && prim.properties?.fill && !prim.properties?.stroke && !prim.properties?.isTrace && !prim.properties?.isComposited;
                     
                     if (isRegion) {
                         try {
                             const resolved = await this.geometryProcessor.unionGeometry([prim]);
                             if (resolved && resolved.length > 0) {
-                                resolved.forEach(r => {
-                                    if (!r.properties) r.properties = {};
-                                    // Preserve metadata
-                                    Object.assign(r.properties, prim.properties);
-                                    r.properties.operationType = operation.type;
-                                    r.properties.operationId = operation.id;
-                                });
+                                resolved.forEach(r => Object.assign(r.properties || (r.properties = {}), prim.properties));
                                 resolvedPrimitives.push(...resolved);
-                                resolvedCount++;
-                            } else {
-                                resolvedPrimitives.push(prim);
-                            }
-                        } catch (e) {
-                            resolvedPrimitives.push(prim);
-                        }
+                            } else { resolvedPrimitives.push(prim); }
+                        } catch (e) { resolvedPrimitives.push(prim); }
                     } else {
                         resolvedPrimitives.push(prim);
                     }
                 }
-                
-                if (resolvedCount > 0) {
-                    this.debug(`[Cut-in Resolution] Resolved ${resolvedCount} region(s) into shells and holes`);
-                }
                 primitivesToProcess = resolvedPrimitives;
             }
 
-            /**
-             * PHASE 1: Separate contours into shells, islands, and holes
-             * Shells:  outer contours that form the pour/clearing boundary.
-             * Islands: outer contours that sit inside a hole (pads, traces in
-             *          clearance gaps). These must NOT be subtracted by holes.
-             * Holes:   clear/hole contours (clearance gaps, anti-pads).
-             */
+            // ── TOPOLOGICAL CATEGORIZATION ──
+            const levelBuckets = [];     // For pre-composited Eagle PolyTrees
+            const complexRegions = [];   // KiCad solid regions containing holes (Copper Pours)
+            const simpleGeometry = [];   // Traces, Flashes, and solid Polygon Pads
 
-            const allOuterContours = [];
-            const holeContours = [];
-
-            // Helper: check if a primitive should be skipped (drill roles in CNC pipeline)
             const isLaserPipeline = settings.clearStrategy !== undefined;
             const shouldSkipPrimitive = (primitive) => {
                 if (isLaserPipeline) return false;
-                const role = primitive.properties?.role;
-                return role === 'drill_hole' || role === 'drill_slot';
+                return primitive.properties?.role === 'drill_hole' || primitive.properties?.role === 'drill_slot';
             };
 
-            primitivesToProcess.forEach(primitive => {
-                if (shouldSkipPrimitive(primitive)) return;
+            primitivesToProcess.forEach(prim => {
+                if (shouldSkipPrimitive(prim)) return;
 
-                const primitivePolarity = primitive.properties?.polarity || 'dark';
-
-                if (primitive.contours && primitive.contours.length > 1) {
-                    const compoundParentId = primitive.id;
-                    primitive.contours.forEach(contour => {
-                        const simplePrimitive = new PathPrimitive([contour], {
-                            ...primitive.properties,
-                            polarity: contour.isHole ? 'clear' : 'dark',
-                            _compoundParentId: compoundParentId,
-                            _nestingLevel: contour.nestingLevel || 0
+                if (prim.properties?.isComposited) {
+                    // Eagle files: Already fully resolved into a PolyTree. Just bin by nesting level.
+                    if (prim.contours && prim.contours.length > 0) {
+                        prim.contours.forEach(contour => {
+                            const lvl = contour.nestingLevel || 0;
+                            if (!levelBuckets[lvl]) levelBuckets[lvl] = [];
+                            levelBuckets[lvl].push(new PathPrimitive([contour], { ...prim.properties }));
                         });
-
-                        if (contour.isHole) {
-                            holeContours.push(simplePrimitive);
-                        } else {
-                            allOuterContours.push(simplePrimitive);
-                        }
-                    });
-                } else if (primitive.contours && primitive.contours.length === 1) {
-                    if (primitivePolarity === 'clear') {
-                        holeContours.push(primitive);
                     } else {
-                        allOuterContours.push(primitive);
+                        if (!levelBuckets[0]) levelBuckets[0] = [];
+                        levelBuckets[0].push(prim);
                     }
                 } else {
-                    if (primitivePolarity === 'clear') {
-                        holeContours.push(primitive);
+                    // KiCad files: Sort into Simple vs Complex
+                    const isTraceOrPad = prim.properties?.isTrace || prim.properties?.isPad || prim.properties?.isFlash || prim.properties?.stroke;
+
+                    if (prim.type === 'path' && prim.contours && prim.contours.length > 0 && !isTraceOrPad) {
+                        // Check if this region actually contains any holes
+                        const hasHoles = prim.contours.some(c => c.isHole);
+                        if (hasHoles) {
+                            complexRegions.push(prim); // Treat as a Copper Pour
+                        } else {
+                            simpleGeometry.push(prim); // Treat as a solid Polygon Pad
+                        }
                     } else {
-                        allOuterContours.push(primitive);
+                        simpleGeometry.push(prim); // Standard traces and flashes
                     }
                 }
             });
-
-            /** Classify outers as shells vs islands
-             * Level-0 outers skip holes from the same compound primitive (prevents ring shapes like "0" from self-classifying as islands).
-             * Level-2+ outers (pads inside clearance gaps) test against ALL holes including same-compound siblings — they ARE islands.
-             */
-            const shellOuters = [];
-            const islandOuters = [];
-
-            if (holeContours.length > 0 && allOuterContours.length > 1) {
-                const holeEntries = holeContours.map(h => {
-                    const points = (h.contours && h.contours[0]?.points) ? h.contours[0].points : null;
-                    const parentId = h.properties?._compoundParentId || null;
-                    return points ? { points, parentId } : null;
-                }).filter(Boolean);
-
-                for (const outer of allOuterContours) {
-                    const testPoint = GeometryUtils.getRepresentativePoint(outer);
-                    const outerParentId = outer.properties?._compoundParentId || null;
-                    const outerNestingLevel = outer.properties?._nestingLevel || 0;
-
-                    let isInsideHole = false;
-                    if (testPoint) {
-                        for (const entry of holeEntries) {
-                            if (outerNestingLevel === 0 &&
-                                outerParentId && entry.parentId &&
-                                outerParentId === entry.parentId) {
-                                continue;
-                            }
-                            if (GeometryUtils.pointInPolygon(testPoint, entry.points)) {
-                                isInsideHole = true;
-                                break;
-                            }
-                        }
-                    }
-
-                    if (isInsideHole) {
-                        islandOuters.push(outer);
-                    } else {
-                        shellOuters.push(outer);
-                    }
-                }
-
-                this.debug(`Island detection: ${allOuterContours.length} outers → ${shellOuters.length} shells + ${islandOuters.length} islands (${holeContours.length} holes)`);
-            } else {
-                shellOuters.push(...allOuterContours);
-            }
-
-            this.debug(`Separated into ${shellOuters.length} shell outers, ${islandOuters.length} island outers, and ${holeContours.length} hole contours.`);
-
-            /**
-             * PHASE 2: Generate offsets for each pass
-             */
 
             operation.offsets = [];
             const passResults = [];
@@ -1309,83 +1211,98 @@
 
                 this.debug(`--- PASS ${passIndex + 1}/${offsetDistances.length}: ${distance.toFixed(3)}mm (${offsetType}) ---`);
 
-                // Offset shells
-                const offsetShells = [];
-                for (const primitive of shellOuters) {
-                    const result = await this.geometryOffsetter.offsetPrimitive(primitive, distance);
-                    if (Array.isArray(result)) {
-                        offsetShells.push(...result);
-                    } else if (result) {
-                        offsetShells.push(result);
+                // Helper to process arrays through the fast mathematical offsetter
+                const processGroup = async (group, dist) => {
+                    const out = [];
+                    for (const p of group) {
+                        const res = await this.geometryOffsetter.offsetPrimitive(p, dist);
+                        if (Array.isArray(res)) out.push(...res);
+                        else if (res) out.push(res);
                     }
-                }
+                    return out;
+                };
 
-                // Offset islands
-                const offsetIslands = [];
-                for (const primitive of islandOuters) {
-                    const result = await this.geometryOffsetter.offsetPrimitive(primitive, distance);
-                    if (Array.isArray(result)) {
-                        offsetIslands.push(...result);
-                    } else if (result) {
-                        offsetIslands.push(result);
-                    }
-                }
+                let finalPassGeometry = [];
 
-                // Offset holes (invert distance)
-                const offsetHoles = [];
-                for (const primitive of holeContours) {
-                    const result = await this.geometryOffsetter.offsetPrimitive(primitive, -distance);
-                    if (Array.isArray(result)) {
-                        offsetHoles.push(...result);
-                    } else if (result) {
-                        offsetHoles.push(result);
-                    }
-                }
+                if (levelBuckets.length > 0) {
+                    // ── EAGLE LOGIC: Level-by-Level Recomposition ──
+                    const offsetSimpleGeom = await processGroup(simpleGeometry, distance);
 
-                this.debug(`Offset generated: ${offsetShells.length} shells, ${offsetIslands.length} islands, ${offsetHoles.length} holes.`);
+                    for (let lvl = 0; lvl < levelBuckets.length; lvl++) {
+                        const bucket = levelBuckets[lvl];
+                        if (!bucket || bucket.length === 0) continue;
 
-                /** 
-                 * PHASE 3: Boolean operations with island protection
-                 * 1. Union shells, subtract holes → pour offset geometry
-                 * 2. Union islands back in → final geometry with pads preserved
-                 */
+                        const isHoleLevel = lvl % 2 === 1;
+                        const dist = isHoleLevel ? -distance : distance;
+                        const offsetBucket = await processGroup(bucket, dist);
 
-                let finalPassGeometry;
+                        if (offsetBucket.length === 0) continue;
 
-                const totalOuters = offsetShells.length + offsetIslands.length;
-                const needsBoolean = offsetHoles.length > 0 || totalOuters > 1;
-
-                if (!needsBoolean) {
-                    this.debug(`Single offset result, skipping boolean operations`);
-                    finalPassGeometry = [...offsetShells, ...offsetIslands];
-                } else {
-                    this.debug(`Running island-aware boolean operations...`);
-
-                    // Shells & Holes
-                    let shellResult = [];
-                    if (offsetShells.length > 0) {
-                        const shellUnion = await this.geometryProcessor.unionGeometry(offsetShells);
-                        this.debug(`Union of shells resulted in ${shellUnion.length} shape(s).`);
-
-                        if (offsetHoles.length > 0) {
-                            const holeUnion = await this.geometryProcessor.unionGeometry(offsetHoles);
-                            this.debug(`Union of holes resulted in ${holeUnion.length} shape(s).`);
-                            shellResult = await this.geometryProcessor.difference(shellUnion, holeUnion);
-                            this.debug(`Shell − Holes resulted in ${shellResult.length} shape(s).`);
+                        if (lvl === 0) {
+                            finalPassGeometry = await this.geometryProcessor.unionGeometry(offsetBucket);
+                        } else if (isHoleLevel) {
+                            if (finalPassGeometry.length > 0) {
+                                const holeUnion = await this.geometryProcessor.unionGeometry(offsetBucket);
+                                finalPassGeometry = await this.geometryProcessor.difference(finalPassGeometry, holeUnion);
+                            }
                         } else {
-                            shellResult = shellUnion;
+                            const islandUnion = await this.geometryProcessor.unionGeometry(offsetBucket);
+                            finalPassGeometry = await this.geometryProcessor.unionGeometry(finalPassGeometry.concat(islandUnion));
                         }
                     }
 
-                    // Union islands back (protected from hole subtraction)
-                    if (offsetIslands.length > 0) {
-                        this.debug(`Unioning ${offsetIslands.length} protected island(s) back into result...`);
-                        finalPassGeometry = await this.geometryProcessor.unionGeometry(
-                            [...shellResult, ...offsetIslands]
-                        );
-                        this.debug(`Final union: ${finalPassGeometry.length} shape(s).`);
-                    } else {
-                        finalPassGeometry = shellResult;
+                    if (offsetSimpleGeom.length > 0) {
+                        if (finalPassGeometry.length > 0) {
+                            finalPassGeometry = await this.geometryProcessor.unionGeometry(finalPassGeometry.concat(offsetSimpleGeom));
+                        } else {
+                            finalPassGeometry = await this.geometryProcessor.unionGeometry(offsetSimpleGeom);
+                        }
+                    }
+                } else {
+                    // ── KICAD LOGIC: Per-Region Resolution ──
+                    // Batch all simple traces and polygon pads into one fast operation
+                    const offsetSimpleGeom = await processGroup(simpleGeometry, distance);
+                    const resolvedOffsetRegions = [];
+
+                    // Resolve ONLY regions with holes independently
+                    for (const regionPrim of complexRegions) {
+                        const regionShells = [];
+                        const regionHoles = [];
+
+                        regionPrim.contours.forEach(contour => {
+                            const simplePrim = new PathPrimitive([contour], { ...regionPrim.properties });
+                            if (contour.isHole) regionHoles.push(simplePrim);
+                            else regionShells.push(simplePrim);
+                        });
+
+                        const offsetShells = await processGroup(regionShells, distance);
+                        const offsetHoles = await processGroup(regionHoles, -distance);
+
+                        let regionResult = [];
+                        if (offsetShells.length > 0) {
+                            const shellUnion = await this.geometryProcessor.unionGeometry(offsetShells);
+                            if (offsetHoles.length > 0) {
+                                const holeUnion = await this.geometryProcessor.unionGeometry(offsetHoles);
+                                regionResult = await this.geometryProcessor.difference(shellUnion, holeUnion);
+                            } else {
+                                regionResult = shellUnion;
+                            }
+                        }
+
+                        if (regionResult.length > 0) {
+                            resolvedOffsetRegions.push(...regionResult);
+                        }
+                    }
+
+                    // Final Union
+                    if (resolvedOffsetRegions.length > 0) {
+                        if (offsetSimpleGeom.length > 0) {
+                            finalPassGeometry = await this.geometryProcessor.unionGeometry(resolvedOffsetRegions.concat(offsetSimpleGeom));
+                        } else {
+                            finalPassGeometry = await this.geometryProcessor.unionGeometry(resolvedOffsetRegions);
+                        }
+                    } else if (offsetSimpleGeom.length > 0) {
+                        finalPassGeometry = await this.geometryProcessor.unionGeometry(offsetSimpleGeom);
                     }
                 }
 
@@ -1421,13 +1338,9 @@
                     primitives: reconstructedGeometry,
                     metadata: {
                         sourceCount: primitivesToProcess.length,
-                        shellCount: offsetShells.length,
-                        islandCount: offsetIslands.length,
-                        holeCount: offsetHoles.length,
                         finalCount: reconstructedGeometry.length,
                         generatedAt: Date.now(),
                         toolDiameter: settings.toolDiameter,
-                        analytic: !needsBoolean,
                         wasFused: primitivesToProcess !== operation.primitives
                     }
                 });

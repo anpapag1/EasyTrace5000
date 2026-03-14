@@ -623,7 +623,9 @@
                 const cmd = plan.commands[i];
                 if (cmd.x === null || cmd.y === null) continue;
 
-                const dist = Math.hypot(cmd.x - fromPos.x, cmd.y - fromPos.y);
+                const dx = cmd.x - fromPos.x;
+                const dy = cmd.y - fromPos.y;
+                const dist = Math.sqrt(dx * dx + dy * dy); // ~4x faster than Math.hypot
 
                 if (dist < bestDist) {
                     bestDist = dist;

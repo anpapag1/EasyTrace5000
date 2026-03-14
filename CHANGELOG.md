@@ -4,10 +4,16 @@ All notable changes to the **EasyTrace5000** project will be documented in this 
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.0.10] - 2026-XX-XX
+
+### Fixed
+- **Copper Pour Regions:** KiCAD and Fusion/Eagle copper pours should now interact correctly with all geometry. (EasyEDA pours TBD.)
+- **Minor Optimizations** 
+
 ## [1.0.9] - 2026-03-11
 
 ### Fixed
-- **Winding Enforcement:** Winding is now set at the source to avoid having to check and fixing everywhere else.
+- **Winding Enforcement:** Winding is now set at the source to avoid having to check and fix it everywhere else.
 - **Further Optimizations:** Removed useless winding checks and enforcements through-out.
 
 ### Changed
@@ -22,11 +28,11 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 - **Changes to the offset pipeline made everything slightly more accurate but slower, optimization to come**
 
 ### Added
-- **Arc Definitions in Laser SVGs:** Offset Strategy Arcs in exported Laser SVGs will come out right now.
+- **Copper Pour Regions:** KiCAD and Fusion Copper Pour regions are now correctly parsed, plotted and processed in Copper Isolation Operations (Copper Clear works but is even slower).
 - **New Tiny/Noisy/Collapsed Arc Safeguards:** More protections against small arcs with a tendency to collapse on themselfes, plus less random unnecessarily small arcs.
 
 ### Fixed
-- **Copper Pour Regions:** KiCAD and Fusion Copper Pour regions are now correctly parsed, plotted and processed in Copper Isolation Operations (Copper Clear works but is even slower).
+- **Arc Definitions in Laser SVGs:** Offset Strategy Arcs in exported Laser SVGs will come out right now.
 - **Clipper Wrapper and Arc Reconstruction Optimizations:** Older modules - newish logic.
 
 ### Changed

@@ -116,8 +116,6 @@
 
                         // Process this contour's points for curve reconstruction
                         const groups = this.groupPointsWithGaps(contour.points, true);
-
-                        // Build reconstructed contour
                         const enhancedContour = this.reconstructContour(contour, groups);
                         reconstructedContours.push(enhancedContour);
                     }
@@ -170,35 +168,31 @@
                     if (curveData) {
                         const arcFromPoints = this.calculateArcFromPoints(group.points, curveData);
 
-                        if (arcFromPoints && this._isArcWorthReconstruction(arcFromPoints, group.points)) {
-                            this.stats.partialArcs++;
+                        // Pre-determine if this should be a full circle
+                        const expectedSegments = GeometryUtils.getOptimalSegments(curveData.radius, curveData.type === 'circle' ? 'circle' : 'arc');
+                        const isFullCircle = curveData.type === 'circle' && group.points.length >= expectedSegments;
 
+                        // Correct the sweep angle before validation
+                        if (arcFromPoints && isFullCircle) {
+                            arcFromPoints.sweepAngle = this.calculateAngularSweep(group.points, curveData.center, true);
+                        }
+
+                        // Bypass worthiness checks if it's known it's a full circle
+                        if (arcFromPoints && (isFullCircle || this._isArcWorthReconstruction(arcFromPoints, group.points))) {
                             const startPoint = group.points[0];
                             const endPoint = group.points[group.points.length - 1];
-
-                            // Always push both endpoints — dedup happens once at the contour level, not per-group. Skipping the push here causes arcStartIdx to point to the previous group's endpoint, which can collapse to startIndex === endIndex after final dedup and silently drop the arc.
                             newPoints.push(startPoint);
                             const arcStartIdx = newPoints.length - 1;
-                            // Check if endPoint is essentially the same as startPoint (full circle)
 
-                            const startEndDx = startPoint.x - endPoint.x;
-                            const startEndDy = startPoint.y - endPoint.y;
-                            const isFullCircle = (startEndDx * startEndDx + startEndDy * startEndDy) < 1e-9;
-
-                            if (!isFullCircle) {
+                            if (isFullCircle) {
+                                this.stats.fullCircles++;
+                                newPoints.push({ x: startPoint.x, y: startPoint.y });
+                            } else {
+                                this.stats.partialArcs++;
                                 newPoints.push(endPoint);
                             }
-                            // For full circles, endIndex wraps to startIndex
 
-                            const arcEndIdx = isFullCircle ? arcStartIdx : (newPoints.length - 1);
-                            // Compute sweep including the closing segment when this group covers the entire contour (all points belong to one curve).
-                            // This prevents underestimation of full-circle sweeps.
-                            // REVIEW THIS LOGIC - IF ANY POINT IS MISSING THEN IT'S NOT A FULL CIRCLE - IT CAN ONLY BE A FULL CIRCLE IF ALL POINTS ARE PRESENT, EVEN IF NOT CLOSED PROPERLY
-                            let sweepAngle = arcFromPoints.sweepAngle;
-                            if (isFullCircle && Math.abs(sweepAngle) < (2 * Math.PI * 0.95)) {
-                                // The sweep was computed with isClosed=false, missing the closing segment. Recalculate with closing segment included.
-                                sweepAngle = this.calculateAngularSweep(group.points, curveData.center, true);
-                            }
+                            const arcEndIdx = newPoints.length - 1;
 
                             detectedArcSegments.push({
                                 startIndex: arcStartIdx,
@@ -207,12 +201,11 @@
                                 radius: arcFromPoints.radius,
                                 startAngle: arcFromPoints.startAngle,
                                 endAngle: arcFromPoints.endAngle,
-                                sweepAngle: sweepAngle,
+                                sweepAngle: arcFromPoints.sweepAngle, // Uses the corrected sweep
                                 clockwise: arcFromPoints.clockwise,
                                 curveId: group.curveId
                             });
                         } else {
-                            // Arc rejected — strip curveId so DP can simplify
                             for (const p of group.points) {
                                 newPoints.push({ x: p.x, y: p.y });
                             }
@@ -241,9 +234,16 @@
                 }
             }
 
-            // ── Deduplicate adjacent points and remap arc indices ──
+            // Deduplicate adjacent points and remap arc indices
             const dedupedPoints = [newPoints[0]];
             const indexRemap = [0];
+
+            // Protect arc endpoints from deduplication so 360-degree sweeps survive
+            const protectedIndices = new Set();
+            detectedArcSegments.forEach(arc => {
+                protectedIndices.add(arc.startIndex);
+                protectedIndices.add(arc.endIndex);
+            });
 
             for (let j = 1; j < newPoints.length; j++) {
                 const prev = dedupedPoints[dedupedPoints.length - 1];
@@ -251,7 +251,7 @@
                 const dx = prev.x - curr.x;
                 const dy = prev.y - curr.y;
 
-                if ((dx * dx + dy * dy) > 1e-9) {
+                if ((dx * dx + dy * dy) > 1e-9 || protectedIndices.has(j)) {
                     indexRemap.push(dedupedPoints.length);
                     dedupedPoints.push(curr);
                 } else {
@@ -262,7 +262,7 @@
             const remappedArcs = detectedArcSegments.map(arc => {
                 const newStart = indexRemap[arc.startIndex];
                 const newEnd = indexRemap[arc.endIndex];
-                if (newStart !== newEnd) {
+                if (newStart >= 0 && newEnd >= 0) {
                     return { ...arc, startIndex: newStart, endIndex: newEnd };
                 }
                 return null;
@@ -450,6 +450,13 @@
                 return null;
             }
 
+            // All tessellation points must be present — missing points means Clipper2 clipped this circle.
+            const expectedSegments = GeometryUtils.getOptimalSegments(curveData.radius, 'circle');
+            if (group.points.length < expectedSegments) {
+                this.debug(`Full circle rejected: ${group.points.length}/${expectedSegments} points present (ID: ${group.curveId})`);
+                return null;
+            }
+
             const totalSweep = this.calculateAngularSweep(group.points, curveData.center, primitive.closed);
 
             if (Math.abs(totalSweep) >= (2 * Math.PI * 0.99)) {
@@ -474,14 +481,19 @@
         }
 
         reconstructPathWithArcs(primitive, groups) {
-            // 1. Store original point count for validation
-            let originalPoints = [];
-            if (primitive.contours && primitive.contours.length > 0) {
-                originalPoints = primitive.contours[0].points;
+            if (!primitive.contours || primitive.contours.length === 0) {
+                return [primitive];
             }
-            const originalPointCount = originalPoints.length;
 
-            // 2. Build the new, simplified points array while detecting arc segments
+            const contour = primitive.contours[0];
+            if (!contour.points || contour.points.length < 3) {
+                return [primitive];
+            }
+
+            this.stats.pathsWithCurves++;
+            const originalPointCount = contour.points.length;
+
+            // Build the new points array and detect arc segments
             const detectedArcSegments = [];
             const newPoints = [];
 
@@ -492,23 +504,36 @@
                     if (curveData) {
                         const arcFromPoints = this.calculateArcFromPoints(group.points, curveData);
 
-                        if (arcFromPoints && this._isArcWorthReconstruction(arcFromPoints, group.points)) {
-                            // An arc was successfully identified.
-                            this.stats.partialArcs++;
+                        // Pre-determine if this should be a full circle
+                        const expectedSegments = GeometryUtils.getOptimalSegments(curveData.radius, curveData.type === 'circle' ? 'circle' : 'arc');
+                        const isFullCircle = curveData.type === 'circle' && group.points.length >= expectedSegments;
 
-                            // Add both the start and end points of the arc group to the new path.
-                            // The renderer needs both vertices to define the segment.
+                        // Correct the sweep angle before validation
+                        if (arcFromPoints && isFullCircle) {
+                            arcFromPoints.sweepAngle = this.calculateAngularSweep(group.points, curveData.center, true);
+                        }
+
+                        // Bypass worthiness checks if it's a full circle
+                        if (arcFromPoints && (isFullCircle || this._isArcWorthReconstruction(arcFromPoints, group.points))) {
                             const startPoint = group.points[0];
                             const endPoint = group.points[group.points.length - 1];
 
                             newPoints.push(startPoint);
-                            newPoints.push(endPoint);
+                            const arcStartIdx = newPoints.length - 1;
+
+                            if (isFullCircle) {
+                                this.stats.fullCircles++;
+                                newPoints.push({ x: startPoint.x, y: startPoint.y });
+                            } else {
+                                this.stats.partialArcs++;
+                                newPoints.push(endPoint);
+                            }
+
+                            const arcEndIdx = newPoints.length - 1;
 
                             detectedArcSegments.push({
-                                // The startIndex is now the second-to-last point added.
-                                startIndex: newPoints.length - 2,
-                                // The endIndex is now the last point added.
-                                endIndex: newPoints.length - 1,
+                                startIndex: arcStartIdx,
+                                endIndex: arcEndIdx,
                                 center: arcFromPoints.center,
                                 radius: arcFromPoints.radius,
                                 startAngle: arcFromPoints.startAngle,
@@ -534,59 +559,65 @@
                 }
             }
 
-            // 3. Post-process to handle duplicate points at segment joins.
-            const finalPoints = [];
-            if (newPoints.length > 0) {
-                finalPoints.push(newPoints[0]);
-                for (let i = 1; i < newPoints.length; i++) {
-                    const p1 = newPoints[i-1];
-                    const p2 = newPoints[i];
-                    // A simple distance check to merge identical points
-                    const dx = p1.x - p2.x;
-                    const dy = p1.y - p2.y;
-                    if ((dx * dx + dy * dy) > 1e-9) { // Using squared distance for efficiency
-                        finalPoints.push(p2);
-                    } else {
-                        // If points were merged, update the arc segment indices
-                        detectedArcSegments.forEach(seg => {
-                            if (seg.startIndex >= i) seg.startIndex--;
-                            if (seg.endIndex >= i) seg.endIndex--;
-                        });
-                    }
+            const dedupedPoints = [newPoints[0]];
+            const indexRemap = [0];
+
+            const protectedIndices = new Set();
+            detectedArcSegments.forEach(arc => {
+                protectedIndices.add(arc.startIndex);
+                protectedIndices.add(arc.endIndex);
+            });
+
+            for (let j = 1; j < newPoints.length; j++) {
+                const prev = dedupedPoints[dedupedPoints.length - 1];
+                const curr = newPoints[j];
+                const dx = prev.x - curr.x;
+                const dy = prev.y - curr.y;
+
+                if ((dx * dx + dy * dy) > 1e-9 || protectedIndices.has(j)) {
+                    indexRemap.push(dedupedPoints.length);
+                    dedupedPoints.push(curr);
+                } else {
+                    indexRemap.push(dedupedPoints.length - 1);
                 }
             }
 
-            // 4. Perform validation check
-            const newPointCount = finalPoints.length;
-            if (debugConfig.enabled && detectedArcSegments.length > 0) {
-                if (newPointCount >= originalPointCount) {
-                    console.warn(`[ArcReconstructor] Point count not reduced or increased: ${originalPointCount} -> ${newPointCount}. This is acceptable if arcs had few segments.`, {
+            const remappedArcs = detectedArcSegments.map(arc => {
+                const newStart = indexRemap[arc.startIndex];
+                const newEnd = indexRemap[arc.endIndex];
+                if (newStart >= 0 && newEnd >= 0) {
+                    return { ...arc, startIndex: newStart, endIndex: newEnd };
+                }
+                return null;
+            }).filter(Boolean);
+
+            if (debugConfig.enabled && remappedArcs.length > 0) {
+                if (dedupedPoints.length >= originalPointCount) {
+                    console.warn(`[ArcReconstructor] Point count not reduced: ${originalPointCount} -> ${dedupedPoints.length}. Acceptable if arcs had few segments.`, {
                         primitiveId: primitive.id
                     });
                 } else {
-                    this.debug(`Point count reduced: ${originalPointCount} -> ${newPointCount}`);
+                    this.debug(`Point count reduced: ${originalPointCount} -> ${dedupedPoints.length}`);
                 }
             }
 
-            // 5. Create the final primitive            
+            if (remappedArcs.length > 0) {
+                this.stats.reconstructed += remappedArcs.length;
+            }
+
             const newContour = {
-                points: finalPoints,
+                points: dedupedPoints,
                 isHole: primitive.properties.isHole || false,
                 nestingLevel: primitive.properties.nestingLevel || 0,
                 parentId: primitive.properties.parentId || null,
-                arcSegments: detectedArcSegments,
-                curveIds: Array.from(new Set(detectedArcSegments.map(s => s.curveId)))
+                arcSegments: remappedArcs,
+                curveIds: Array.from(new Set(remappedArcs.map(s => s.curveId)))
             };
 
-            if (detectedArcSegments.length > 0) {
-                this.stats.reconstructed += detectedArcSegments.length;
-            }
-
-            const pathPrim = new PathPrimitive([newContour], {
+            return new PathPrimitive([newContour], {
                 ...primitive.properties,
-                hasDetectedArcs: detectedArcSegments.length > 0
+                hasDetectedArcs: remappedArcs.length > 0
             });
-            return pathPrim;
         }
 
         /**
@@ -594,7 +625,6 @@
          * Tiny, nearly-flat arcs are left as linear segments so downstream simplification (DP) can handle them if need be.
          */
         _isArcWorthReconstruction(arcParams, points) {
-            // Lowered to 2 degrees. (Noise is usually < 0.5 deg)
             const minSweepDeg = 2.0; 
             const minChordLen = 0.01; 
 
