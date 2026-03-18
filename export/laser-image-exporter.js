@@ -50,8 +50,6 @@
             this.HAIRLINE_STROKE = 0.01; // mm — standard laser hairline
             this.MAX_CANVAS_DIM = 16000;
             this.FUSION_TOLERANCE = 0.001;
-            this.HEAT_GRID_SIZE = 4;          // 4×4 spatial zone grid for heat management
-            this._zoneTraversalOrder = null;  // Cached greedy traversal order
         }
 
         async generate(layers, options) {
@@ -76,7 +74,9 @@
                 heightMm: output.heightMm,
                 padding: padding,
                 heatManagement: options.heatManagement || 'off',
-                reverseCutOrder: options.reverseCutOrder || false
+                reverseCutOrder: options.reverseCutOrder || false,
+                svgGrouping: options.svgGrouping || 'layer',
+                colorPerPass: options.colorPerPass || false
             };
 
             if (options.format === 'png') {
@@ -250,104 +250,119 @@
         // ────────────────────────────────────────────────────────────
 
         async _generateSVG(layers, renderCtx) {
-            const { mat, widthMm, heightMm } = renderCtx;
+            const { mat, widthMm, heightMm, svgGrouping, reverseCutOrder } = renderCtx;
             const p = this.PRECISION;
+            const fmt = (n) => this._formatNumber(n, this.PRECISION);
 
             const lines = [];
             lines.push(`<?xml version="1.0" encoding="UTF-8" standalone="no"?>`);
-            lines.push(`<svg xmlns="http://www.w3.org/2000/svg" width="${widthMm.toFixed(p)}mm" height="${heightMm.toFixed(p)}mm" viewBox="0 0 ${widthMm.toFixed(p)} ${heightMm.toFixed(p)}" version="1.1">`);
+            lines.push(`<svg xmlns="http://www.w3.org/2000/svg" xmlns:inkscape="http://www.inkscape.org/namespaces/inkscape" width="${widthMm.toFixed(p)}mm" height="${heightMm.toFixed(p)}mm" viewBox="0 0 ${widthMm.toFixed(p)} ${heightMm.toFixed(p)}" version="1.1">`);
             lines.push(`<style>path,circle,line{vector-effect:non-scaling-stroke;stroke-width:1px;-inkscape-stroke:hairline}</style>`);
 
-            const useFlatHierarchy = layers.length === 1;
-
+            // Master transform group — required because coordinates are in raw CAM space.
             // Apply the global matrix transform here (handles origin, rotation, mirror, and Y-flip natively)
             const transformAttr = `transform="matrix(${mat.a}, ${mat.b}, ${mat.c}, ${mat.d}, ${mat.e}, ${mat.f})"`;
+            lines.push(`<g id="EasyTrace_Export" ${transformAttr}>`);
 
-            if (!useFlatHierarchy) {
-                lines.push(`<g id="EasyTrace_Export" ${transformAttr}>`);
-            }
+            const orderedLayers = reverseCutOrder ? layers.slice().reverse() : layers;
+            const useGroups = svgGrouping !== 'none';
+            const useLayers = svgGrouping === 'layer';
 
-            for (const layer of layers) {
-                const layerGroupId = useFlatHierarchy ? 'EasyTrace_Export' : `Layer_${this._sanitizeId(layer.layerName)}`;
-                const layerAttrs = `id="${layerGroupId}" stroke-linecap="round" stroke-linejoin="round"`;
+            for (const layer of orderedLayers) {
+                const layerId = this._sanitizeId(layer.layerName);
+                const orderedPasses = reverseCutOrder ? layer.passes.slice().reverse() : layer.passes;
 
-                if (useFlatHierarchy) {
-                    lines.push(`<g ${layerAttrs} ${transformAttr}>`);
-                } else {
-                    lines.push(`  <g ${layerAttrs}>`);
+                // Generate per-pass colors if enabled, otherwise all passes use baseColor
+                const passColors = renderCtx.colorPerPass
+                    ? this._generatePassColors(layer.baseColor, orderedPasses.length)
+                    : null;
+
+                // Indentation depends on whether passes are wrapped in an operation group
+                // Only use operation-level groups in 'group' mode (not 'layer' or 'none')
+                const wrapOperation = useGroups && !useLayers && orderedLayers.length > 1;
+
+                if (wrapOperation) {
+                    lines.push(`  <g id="Layer_${layerId}" stroke-linecap="round" stroke-linejoin="round">`);
                 }
 
-                const indent = useFlatHierarchy ? '  ' : '    ';
-                const innerIndent = useFlatHierarchy ? '    ' : '      ';
+                const indent = wrapOperation ? '    ' : '  ';
+                const innerIndent = useGroups ? (wrapOperation ? '      ' : '    ') : '  ';
 
-                for (let i = 0; i < layer.passes.length; i++) {
-                    const pass = layer.passes[i];
+                for (let i = 0; i < orderedPasses.length; i++) {
+                    const pass = orderedPasses[i];
                     if (!pass.primitives || pass.primitives.length === 0) continue;
 
-                    const isFilled = pass.type === 'filled';
-                    const color = layer.baseColor;
-                    const passId = this._buildPassId(layer.layerName, pass, i);
+                    // Use the pass's own index for naming so Pass 1 always labels the innermost offset
+                    const originalIndex = pass.passIndex != null ? pass.passIndex - 1 : i;
 
-                    // Heat management: reorder offset primitives for thermal distribution
+                    const isFilled = pass.type === 'filled';
+                    const color = passColors ? passColors[originalIndex] : layer.baseColor;
+                    const passId = this._buildPassId(layer.layerName, pass, originalIndex);
                     const isHatch = pass.metadata?.isHatch === true;
 
-                    // Heat management sort — only for offset/stroked passes (not filled regions or hatch)
+                    // Area sort within each pass (always active, regardless of heat management)
                     let sortablePrimitives = (!isFilled && !isHatch)
-                        ? this._applyHeatManagementSort(pass.primitives, renderCtx.heatManagement)
+                        ? this._applyHeatManagementSort(pass.primitives)
                         : pass.primitives;
 
-                    // Reverse cut order: largest features first in DOM (some laser software reads bottom-up)
-                    if (renderCtx.reverseCutOrder && !isFilled) {
+                    if (reverseCutOrder && !isFilled) {
                         sortablePrimitives = sortablePrimitives.slice().reverse();
                     }
 
+                    // Build group opening tag based on mode
+                    const layerAttrs = useLayers
+                        ? ` inkscape:groupmode="layer" inkscape:label="${passId}"`
+                        : '';
+
                     if (isFilled) {
-                        // ── FILLED PASS ──
-                        // Compound path required for fill-rule="evenodd" to correctly handle holes.
-                        lines.push(`${indent}<g id="${passId}" fill="${color}" stroke="none">`);
-
-                        const pathData = this._buildRawPathData(sortablePrimitives);
-                        if (pathData) {
-                            lines.push(`${innerIndent}<path d="${pathData}" fill-rule="evenodd"/>`);
-                        }
-                        this._appendRawCircles(lines, sortablePrimitives, innerIndent);
-
-                        lines.push(`${indent}</g>`);
-                    } else {
-                        // ── STROKED PASS (offset, hatch, drill marks) ──
-                        // Individual SVG nodes per primitive so DOM order = cutting order.
-                        // Laser software/hardware respect this if there's no internal nearest neighbour path optimizer or it's disabled.
-                        lines.push(`${indent}<g id="${passId}" fill="none" stroke="${color}" stroke-width="${this.HAIRLINE_STROKE}">`);
-
-                        const fmt = (n) => this._formatNumber(n, this.PRECISION);
-                        for (const prim of sortablePrimitives) {
-                            if (prim.type === 'circle' && prim.center && prim.radius) {
-                                // Circle: native SVG element (more precise than path approximation)
-                                lines.push(`${innerIndent}<circle cx="${fmt(prim.center.x)}" cy="${fmt(prim.center.y)}" r="${fmt(prim.radius)}"/>`);
-                            } else {
-                                // Path: build d-string for this single primitive via existing method
-                                const singlePathData = this._buildRawPathData([prim]);
-                                if (singlePathData) {
-                                    lines.push(`${innerIndent}<path d="${singlePathData}"/>`);
+                        if (useGroups) {
+                            lines.push(`${indent}<g id="${passId}"${layerAttrs} fill="${color}" stroke="none">`);
+                            const pathData = this._buildRawPathData(sortablePrimitives);
+                            if (pathData) lines.push(`${innerIndent}<path d="${pathData}" fill-rule="evenodd"/>`);
+                            this._appendRawCircles(lines, sortablePrimitives, innerIndent);
+                            lines.push(`${indent}</g>`);
+                        } else {
+                            const pathData = this._buildRawPathData(sortablePrimitives);
+                            if (pathData) lines.push(`${indent}<path d="${pathData}" fill="${color}" stroke="none" fill-rule="evenodd"/>`);
+                            for (const prim of sortablePrimitives) {
+                                if (prim.type === 'circle' && prim.center && prim.radius) {
+                                    lines.push(`${indent}<circle cx="${fmt(prim.center.x)}" cy="${fmt(prim.center.y)}" r="${fmt(prim.radius)}" fill="${color}" stroke="none"/>`);
                                 }
                             }
                         }
-
-                        lines.push(`${indent}</g>`);
+                    } else {
+                        if (useGroups) {
+                            lines.push(`${indent}<g id="${passId}"${layerAttrs} fill="none" stroke="${color}" stroke-width="${this.HAIRLINE_STROKE}">`);
+                            for (const prim of sortablePrimitives) {
+                                if (prim.type === 'circle' && prim.center && prim.radius) {
+                                    lines.push(`${innerIndent}<circle cx="${fmt(prim.center.x)}" cy="${fmt(prim.center.y)}" r="${fmt(prim.radius)}"/>`);
+                                } else {
+                                    const singlePathData = this._buildRawPathData([prim]);
+                                    if (singlePathData) lines.push(`${innerIndent}<path d="${singlePathData}"/>`);
+                                }
+                            }
+                            lines.push(`${indent}</g>`);
+                        } else {
+                            for (const prim of sortablePrimitives) {
+                                if (prim.type === 'circle' && prim.center && prim.radius) {
+                                    lines.push(`${indent}<circle cx="${fmt(prim.center.x)}" cy="${fmt(prim.center.y)}" r="${fmt(prim.radius)}" fill="none" stroke="${color}" stroke-width="${this.HAIRLINE_STROKE}"/>`);
+                                } else {
+                                    const singlePathData = this._buildRawPathData([prim]);
+                                    if (singlePathData) {
+                                        lines.push(`${indent}<path d="${singlePathData}" fill="none" stroke="${color}" stroke-width="${this.HAIRLINE_STROKE}"/>`);
+                                    }
+                                }
+                            }
+                        }
                     }
                 }
 
-                if (useFlatHierarchy) {
-                    lines.push(`</g>`);
-                } else {
+                if (wrapOperation) {
                     lines.push(`  </g>`);
                 }
             }
 
-            if (!useFlatHierarchy) {
-                lines.push(`</g>`);
-            }
-
+            lines.push(`</g>`);
             lines.push(`</svg>`);
 
             const blob = new Blob([lines.join('\n')], { type: 'image/svg+xml;charset=utf-8' });
@@ -776,112 +791,29 @@
         }
 
         /**
-         * Reorders offset primitives to minimize localized heat buildup.
-         *
-         * Strategy 'standard':
-         *   1. Area bucketing — small, heat-sensitive features globally first
-         *   2. Zone interleaving — spatially distant features consecutive within each bucket
-         *   3. Exact area tiebreak — deterministic ordering within zone+bucket
-         *
-         * Bucket thresholds (mm² of bounding-box area):
-         *   Tiny  < 2     — 0402/0603 pads, thin trace segments, vias
-         *   Small < 10    — QFP/SOIC pads, short traces, small labels
-         *   Medium < 50   — SOT/QFN footprint regions, wider traces
-         *   Large >= 50   — ground pours, board-wide copper fills
-         *
-         * Skipped for hatch and filled passes (caller responsibility).
+         * Sorts primitives within a single pass by bounding-box area, smallest first.
+         * This ensures small sensitive features are always cut before large geometry isolate them from the rest of the copper and limits their ability to cool between cutting passes.
          * Returns a new array; never mutates the input.
          */
-        _applyHeatManagementSort(primitives, strategy) {
-            if (!strategy || strategy === 'off') return primitives;
+        _applyHeatManagementSort(primitives) {
             if (!primitives || primitives.length <= 1) return primitives;
 
             const len = primitives.length;
             const entries = new Array(len);
-            let gMinX = Infinity, gMinY = Infinity, gMaxX = -Infinity, gMaxY = -Infinity;
-
-            // Area bucketing thresholds (mm² bounding-box area)
-            const BUCKET_TINY = 2.0;
-            const BUCKET_SMALL = 10.0;
-            const BUCKET_MEDIUM = 50.0;
 
             for (let i = 0; i < len; i++) {
                 const prim = primitives[i];
                 const bounds = typeof prim.getBounds === 'function' ? prim.getBounds() : null;
-                let area = 0, cx = 0, cy = 0, bucket = 0;
+                let area = 0;
 
                 if (bounds && isFinite(bounds.minX)) {
-                    const w = bounds.maxX - bounds.minX;
-                    const h = bounds.maxY - bounds.minY;
-                    area = w * h;
-                    cx = bounds.minX + w * 0.5;
-                    cy = bounds.minY + h * 0.5;
-                    if (cx < gMinX) gMinX = cx;
-                    if (cx > gMaxX) gMaxX = cx;
-                    if (cy < gMinY) gMinY = cy;
-                    if (cy > gMaxY) gMaxY = cy;
-
-                    if (area < BUCKET_TINY) bucket = 0;
-                    else if (area < BUCKET_SMALL) bucket = 1;
-                    else if (area < BUCKET_MEDIUM) bucket = 2;
-                    else bucket = 3;
+                    area = (bounds.maxX - bounds.minX) * (bounds.maxY - bounds.minY);
                 }
 
-                entries[i] = {
-                    prim: prim,
-                    area: area,
-                    cx: cx,
-                    cy: cy,
-                    zonePriority: 0,
-                    areaBucket: bucket
-                };
+                entries[i] = { prim, area };
             }
 
-            if (strategy === 'standard') {
-                // Area bucketing — configurable thresholds (mm² bounding-box area)
-                const BUCKET_TINY = 2.0;
-                const BUCKET_SMALL = 10.0;
-                const BUCKET_MEDIUM = 50.0;
-
-                for (let i = 0; i < len; i++) {
-                    const a = entries[i].area;
-                    if (a < BUCKET_TINY) entries[i].areaBucket = 0;
-                    else if (a < BUCKET_SMALL) entries[i].areaBucket = 1;
-                    else if (a < BUCKET_MEDIUM) entries[i].areaBucket = 2;
-                    else entries[i].areaBucket = 3;
-                }
-
-                // Spatial zone assignment (unchanged grid logic)
-                const gs = this.HEAT_GRID_SIZE;
-                const rangeX = gMaxX - gMinX;
-                const rangeY = gMaxY - gMinY;
-
-                if (rangeX > 0 || rangeY > 0) {
-                    const scaleX = gs / (rangeX || 1);
-                    const scaleY = gs / (rangeY || 1);
-                    const zoneOrder = this._getZoneTraversalOrder();
-
-                    const total = gs * gs;
-                    const zonePriorityLookup = new Uint8Array(total);
-                    for (let p = 0; p < zoneOrder.length; p++) {
-                        zonePriorityLookup[zoneOrder[p]] = p;
-                    }
-
-                    for (let i = 0; i < len; i++) {
-                        const e = entries[i];
-                        const col = Math.min(gs - 1, (e.cx - gMinX) * scaleX | 0);
-                        const row = Math.min(gs - 1, (e.cy - gMinY) * scaleY | 0);
-                        e.zonePriority = zonePriorityLookup[row * gs + col];
-                    }
-                }
-
-                // Final sort: bucket (smallest globally first) → zone (scatter) → exact area (deterministic)
-                entries.sort((a, b) => {
-                    if (a.areaBucket !== b.areaBucket) return a.areaBucket - b.areaBucket;
-                    if (a.zonePriority !== b.zonePriority) return a.zonePriority - b.zonePriority;
-                    return a.area - b.area;
-                });
-            }
+            entries.sort((a, b) => a.area - b.area);
 
             const result = new Array(len);
             for (let i = 0; i < len; i++) {
@@ -890,49 +822,78 @@
             return result;
         }
 
-        /**
-         * Greedy Manhattan-distance maximizing traversal order for the heat grid.
-         * Computed once, cached for the instance lifetime.
-         */
-        _getZoneTraversalOrder() {
-            if (this._zoneTraversalOrder) return this._zoneTraversalOrder;
-
-            const gs = this.HEAT_GRID_SIZE;
-            const total = gs * gs;
-            const used = new Uint8Array(total);
-            const order = new Array(total);
-
-            order[0] = 0;
-            used[0] = 1;
-
-            for (let step = 1; step < total; step++) {
-                const prev = order[step - 1];
-                const prevRow = (prev / gs) | 0;
-                const prevCol = prev % gs;
-
-                let bestZone = 0;
-                let bestDist = -1;
-
-                for (let z = 0; z < total; z++) {
-                    if (used[z]) continue;
-                    const dist = Math.abs(((z / gs) | 0) - prevRow) + Math.abs((z % gs) - prevCol);
-                    if (dist > bestDist) {
-                        bestDist = dist;
-                        bestZone = z;
-                    }
-                }
-
-                order[step] = bestZone;
-                used[bestZone] = 1;
-            }
-
-            this._zoneTraversalOrder = order;
-            return order;
-        }
-
         // ────────────────────────────────────────────────────────────
         // Naming helpers
         // ────────────────────────────────────────────────────────────
+
+        /**
+         * Generates a distinct color for each pass by rotating hue from a base color.
+         * Returns an array of hex color strings, one per pass.
+         */
+        _generatePassColors(baseColor, passCount) {
+            if (passCount <= 1) return [baseColor];
+
+            // Parse base color to HSL
+            const r = parseInt(baseColor.slice(1, 3), 16) / 255;
+            const g = parseInt(baseColor.slice(3, 5), 16) / 255;
+            const b = parseInt(baseColor.slice(5, 7), 16) / 255;
+
+            const max = Math.max(r, g, b), min = Math.min(r, g, b);
+            const l = (max + min) / 2;
+            let h = 0, s = 0;
+
+            if (max !== min) {
+                const d = max - min;
+                s = l > 0.5 ? d / (2 - max - min) : d / (max + min);
+                if (max === r) h = ((g - b) / d + (g < b ? 6 : 0)) / 6;
+                else if (max === g) h = ((b - r) / d + 2) / 6;
+                else h = ((r - g) / d + 4) / 6;
+            }
+
+            // Keep saturation high and lightness in visible range
+            const sat = Math.max(s, 0.7);
+            const lit = Math.min(Math.max(l, 0.35), 0.55);
+
+            // Distribute passes evenly across the hue wheel starting from the base hue
+            const colors = [];
+            const hueStep = 1.0 / Math.max(passCount, 2);
+
+            for (let i = 0; i < passCount; i++) {
+                const pH = (h + hueStep * i) % 1.0;
+                colors.push(this._hslToHex(pH, sat, lit));
+            }
+
+            return colors;
+        }
+
+        _hslToHex(h, s, l) {
+            const hue2rgb = (p, q, t) => {
+                if (t < 0) t += 1;
+                if (t > 1) t -= 1;
+                if (t < 1/6) return p + (q - p) * 6 * t;
+                if (t < 1/2) return q;
+                if (t < 2/3) return p + (q - p) * (2/3 - t) * 6;
+                return p;
+            };
+
+            let r, g, b;
+            if (s === 0) {
+                r = g = b = l;
+            } else {
+                const q = l < 0.5 ? l * (1 + s) : l + s - l * s;
+                const p = 2 * l - q;
+                r = hue2rgb(p, q, h + 1/3);
+                g = hue2rgb(p, q, h);
+                b = hue2rgb(p, q, h - 1/3);
+            }
+
+            const toHex = (c) => {
+                const hex = Math.round(c * 255).toString(16);
+                return hex.length === 1 ? '0' + hex : hex;
+            };
+
+            return `#${toHex(r)}${toHex(g)}${toHex(b)}`;
+        }
 
         _buildPassId(layerName, pass, index) {
             const safe = this._sanitizeId(layerName);

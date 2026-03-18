@@ -1458,10 +1458,27 @@
                             </div>
 
                             <div class="property-field field-group col-span-full">
+                                <label for="laser-cut-order">Export DOM Order</label>
+                                <select id="laser-cut-order">
+                                    <option value="normal" selected>Top-Down (First Pass, Smallest Geometry First)</option>
+                                    <option value="reverse">Bottom-Up (Last Pass Largest Geometry First)</option>
+                                </select>
+                            </div>
+
+                            <div class="property-field field-group col-span-full">
                                 <label class="checkbox-label">
-                                    <input type="checkbox" id="laser-reverse-order">
-                                    <span>Reverse Cut Order (Largest First)</span>
+                                    <input type="checkbox" id="laser-color-per-pass">
+                                    <span>Unique color per pass (for color-based layer software)</span>
                                 </label>
+                            </div>
+
+                            <div class="property-field field-group col-span-full">
+                                <label for="laser-svg-grouping">SVG Grouping Structure</label>
+                                <select id="laser-svg-grouping">
+                                    <option value="layer" selected>Inkscape Layers (Standard)</option>
+                                    <option value="group">Standard Groups (&lt;g&gt;)</option>
+                                    <option value="none">No Grouping (Flat Geometry)</option>
+                                </select>
                             </div>
                         </div>
 

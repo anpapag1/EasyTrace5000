@@ -266,11 +266,11 @@
                     || operation.settings?.laserClearStrategy
                     || 'offset';
 
-                if (operation.offsets[0]?.combined) {
-                    const passes = operation.offsets[0].passes || operation.offsets.length;
+                if (operation.offsets[0]?.combined || isLaser) {
+                    const passes = operation.offsets.length;
+                    const totalPrimitives = operation.offsets.reduce((sum, off) => sum + (off.primitives?.length || 0), 0);
                     const label = isLaser ? 'Laser Paths' : 'Offsets';
-                    this.addGeometryNode(fileId, 'offsets_combined', label,
-                        operation.offsets[0].primitives?.length || 0, {
+                    this.addGeometryNode(fileId, 'offsets_combined', label, totalPrimitives, {
                         offset: operation.offsets[0].distance.toFixed(2),
                         combined: true,
                         passes: passes

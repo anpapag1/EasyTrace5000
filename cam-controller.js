@@ -1397,7 +1397,9 @@
                 dpi, padding, transforms,
                 bounds: this.core.coordinateSystem?.boardBounds,
                 heatManagement: exportOptions.heatManagement || 'off',
-                reverseCutOrder: exportOptions.reverseCutOrder || false
+                reverseCutOrder: exportOptions.reverseCutOrder || false,
+                svgGrouping: exportOptions.svgGrouping || 'layer',
+                colorPerPass: exportOptions.colorPerPass || false
             };
 
             // Build layer objects from operations

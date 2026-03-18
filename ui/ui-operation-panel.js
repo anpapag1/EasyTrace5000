@@ -1092,7 +1092,7 @@
                 clearStrategy: strategy,
                 hatchAngle: params.laserHatchAngle,
                 hatchPasses: params.laserHatchPasses,
-                combineOffsets: true
+                combineOffsets: false
             };
 
             // Per-operation-type configuration

@@ -7,10 +7,11 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 ## [1.1.2] - 2026-XX-XX
 
 ### Fixed
-- **Offset Laser SVG Reordering:** The old "optimized" grouping was causing localized heat build-up and scorching. Now invididual
+- **Offset Laser SVG Reordering:** The old "optimized" grouping was causing localized heat build-up and scorching. Each pass should finish before the next and starting from the smallest geometry.
 
 ### Added
 - **Offset Laser SVG Order Flip Toggle** This toggle can flip the order in which geometry is put into the svg in case a software starts processing from the wrong side.
+- **Offset Laser SVG Unique Colors Per Layer Toggle** This toggle can enforce individual colors per layer for softwares that process groups from it.
 
 ## [1.1.1] - 2026-03-17
 

@@ -325,48 +325,63 @@
         addOffsetLayers() {
             this.core.operations.forEach(operation => {
                 if (operation.offsets && operation.offsets.length > 0) {
-                    operation.offsets.forEach((offset, passIndex) => {
-                        if (offset.primitives && offset.primitives.length > 0) {
-                            // Use offset.offsetType instead of operation.type
-                            let offsetType;
-                            if (offset.distance > 0) {
-                                offsetType = 'external';
-                            } else if (offset.distance < 0) {
-                                offsetType = 'internal';
-                            } else {
-                                offsetType = 'on';
-                            }
+                    const isCombined = operation.offsets[0]?.combined;
+                    const isLaser = window.pcbcam?.isLaserPipeline?.() || false;
+                    const hasPreview = !isLaser && operation.preview && operation.preview.primitives && operation.preview.primitives.length > 0;
 
-                            const layerName = offset.combined ? 
-                                `offset_${operation.id}_combined` :
-                                `offset_${operation.id}_pass_${passIndex + 1}`;
+                    if (isCombined) {
+                        // Flatten all passes into one canvas layer for combined visualization
+                        const allPrimitives = operation.offsets.flatMap(o => o.primitives || []);
+                        if (allPrimitives.length > 0) {
+                            let offsetType = 'external';
+                            if (operation.offsets[0].distance < 0) offsetType = 'internal';
+                            else if (operation.offsets[0].distance === 0) offsetType = 'on';
 
-                            // In laser mode, offsets are the visible result so don't hide them.
-                            // In CNC mode, offsets are hidden once a preview exists (preview supersedes).
-                            const isLaser = window.pcbcam?.isLaserPipeline?.() || false;
-                            const hasPreview = !isLaser && operation.preview && operation.preview.primitives && operation.preview.primitives.length > 0;
+                            const isHatch = operation.offsets[0].metadata?.isHatch === true;
 
-                            // Detect hatch layers from metadata flag
-                            const isHatch = offset.metadata?.isHatch === true;
-
-                            this.renderer.addLayer(
-                                layerName,
-                                offset.primitives,
-                                {
-                                    type: 'offset',
-                                    visible: hasPreview ? false : this.renderer.options.showOffsets,
-                                    operationId: operation.id,
-                                    operationType: operation.type,
-                                    offsetType: offsetType,
-                                    pass: offset.pass,
-                                    distance: offset.distance,
-                                    combined: offset.combined || false,
-                                    metadata: offset.metadata,
-                                    isHatch: isHatch
-                                }
-                            );
+                            this.renderer.addLayer(`offset_${operation.id}_combined`, allPrimitives, {
+                                type: 'offset',
+                                visible: hasPreview ? false : this.renderer.options.showOffsets,
+                                operationId: operation.id,
+                                operationType: operation.type,
+                                offsetType: offsetType,
+                                pass: 1,
+                                distance: operation.offsets[0].distance,
+                                combined: true,
+                                metadata: operation.offsets[0].metadata,
+                                isHatch: isHatch
+                            });
                         }
-                    });
+                    } else {
+                        // Individual pass layers
+                        operation.offsets.forEach((offset, passIndex) => {
+                            if (offset.primitives && offset.primitives.length > 0) {
+                                let offsetType;
+                                if (offset.distance > 0) offsetType = 'external';
+                                else if (offset.distance < 0) offsetType = 'internal';
+                                else offsetType = 'on';
+
+                                const isHatch = offset.metadata?.isHatch === true;
+
+                                this.renderer.addLayer(
+                                    `offset_${operation.id}_pass_${passIndex + 1}`,
+                                    offset.primitives,
+                                    {
+                                        type: 'offset',
+                                        visible: hasPreview ? false : this.renderer.options.showOffsets,
+                                        operationId: operation.id,
+                                        operationType: operation.type,
+                                        offsetType: offsetType,
+                                        pass: offset.pass,
+                                        distance: offset.distance,
+                                        combined: false,
+                                        metadata: offset.metadata,
+                                        isHatch: isHatch
+                                    }
+                                );
+                            }
+                        });
+                    }
                 }
 
                 // Preview layer

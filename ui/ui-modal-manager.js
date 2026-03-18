@@ -821,7 +821,7 @@
         }
 
         // Toolpath modal handler
-        showExportManagerHandler(options = {}) {
+        async showExportManagerHandler(options = {}) {
             const operations = options.operations || [];
             const highlightOperationId = options.highlightOperationId || null;
 
@@ -906,21 +906,24 @@
                 dpiInput.value = laserSettings.exportDPI ?? config.laserDefaults?.rasterDPI ?? 1000;
             }
 
-            // Check for heatWarning toggle and display heatWarning
+            // Initialize laser export UI controls to defaults
+            const cutOrderSelect = document.getElementById('laser-cut-order');
+            if (cutOrderSelect) cutOrderSelect.value = 'normal';
+
+            const svgGroupingSelect = document.getElementById('laser-svg-grouping');
+            if (svgGroupingSelect) svgGroupingSelect.value = 'layer';
+
+            const colorPerPassCheckbox = document.getElementById('laser-color-per-pass');
+            if (colorPerPassCheckbox) colorPerPassCheckbox.checked = true;
+
             const heatCheckbox = document.getElementById('laser-heat-management');
             const heatWarning = document.getElementById('laser-heat-warning');
             if (heatCheckbox) {
                 heatCheckbox.checked = true;
                 if (heatWarning) heatWarning.style.display = '';
-                heatCheckbox.addEventListener('change', (e) => {
+                heatCheckbox.onchange = (e) => {
                     if (heatWarning) heatWarning.style.display = e.target.checked ? '' : 'none';
-                });
-            }
-
-            // Reverse cut order toggle (default: off = smallest first)
-            const reverseCheckbox = document.getElementById('laser-reverse-order');
-            if (reverseCheckbox) {
-                reverseCheckbox.checked = false;
+                };
             }
 
             // 
@@ -1185,8 +1188,10 @@
 
                     try {
                         const heatCheckbox = document.getElementById('laser-heat-management');
-                        // Pass the dynamic values into the orchestrator
-                        const reverseOrderCheckbox = document.getElementById('laser-reverse-order');
+                        const cutOrderSelect = document.getElementById('laser-cut-order');
+                        const svgGroupingSelect = document.getElementById('laser-svg-grouping');
+                        const colorPerPassCheckbox = document.getElementById('laser-color-per-pass');
+
                         const result = await this.controller.orchestrateLaserExport(laserOps, {
                             layerColors: colors,
                             format: laserSettings.exportFormat || 'svg',
@@ -1195,7 +1200,9 @@
                             singleFile: isSingleFile,
                             baseName: baseName,
                             heatManagement: (heatCheckbox?.checked && laserSettings.exportFormat !== 'png') ? 'standard' : 'off',
-                            reverseCutOrder: reverseOrderCheckbox?.checked || false
+                            reverseCutOrder: cutOrderSelect ? cutOrderSelect.value === 'reverse' : false,
+                            svgGrouping: svgGroupingSelect ? svgGroupingSelect.value : 'layer',
+                            colorPerPass: colorPerPassCheckbox?.checked || false
                         });
 
                         if (result.success) {
