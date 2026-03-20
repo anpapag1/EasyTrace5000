@@ -38,7 +38,7 @@
             this.lang = ui.lang;
             this.nodes = new Map();
             this.selectedNode = null;
-            this.expandedCategories = new Set(['isolation', 'drill', 'clearing', 'cutout']);
+            this.expandedCategories = new Set(['isolation', 'drill', 'clearing', 'cutout', 'stencil']);
 
             this.nextNodeId = 1;
 
@@ -320,6 +320,18 @@
                         `Toolpath ${index + 1}`, 
                         path.primitives?.length || 0);
                 });
+            }
+
+            const sourceVisBtn = fileData.element.querySelector('.file-node-content .visibility-btn');
+            if (sourceVisBtn && operation.type === 'stencil') {
+                const hasOffsets = operation.offsets && operation.offsets.length > 0;
+                sourceVisBtn.classList.toggle('is-hidden', hasOffsets);
+                
+                // Pre-emptively sync the renderer layer to prevent flashing during the transition
+                const layerName = `source_${operation.id}`;
+                if (this.ui.renderer && this.ui.renderer.layers.has(layerName)) {
+                    this.ui.renderer.layers.get(layerName).visible = !hasOffsets;
+                }
             }
 
             // Update aria-expanded based on populated geometries
@@ -618,6 +630,49 @@
                 button.classList.toggle('is-hidden', !layer.visible);
             } else {
                 console.warn(`[NavTreePanel] Could not find layer to toggle: ${layerName}`);
+            }
+        }
+
+        selectHighestStage(fileId) {
+            const fileData = this.nodes.get(fileId);
+            if (!fileData) return;
+
+            let bestGeo = null;
+
+            // Check for Preview (Highest CNC stage)
+            for (const [id, geo] of fileData.geometries) {
+                if (geo.type === 'preview') {
+                    bestGeo = geo;
+                    break;
+                }
+            }
+
+            // Check for Combined Offsets / Laser Paths / Stencils
+            if (!bestGeo) {
+                for (const [id, geo] of fileData.geometries) {
+                    if (geo.type === 'offsets_combined') {
+                        bestGeo = geo;
+                        break;
+                    }
+                }
+            }
+
+            // Check for Individual Passes
+            if (!bestGeo) {
+                for (const [id, geo] of fileData.geometries) {
+                    if (geo.type.startsWith('offset_')) {
+                        bestGeo = geo;
+                        break; // Grab the first pass
+                    }
+                }
+            }
+
+            // Execute the selection
+            if (bestGeo) {
+                this.selectGeometry(bestGeo.id, fileData.operation, bestGeo.type);
+            } else {
+                // Fallback to the source file if everything else was deleted
+                this.selectFile(fileId, fileData.operation);
             }
         }
 
@@ -1065,7 +1120,7 @@
             if (nodes.length === 0) return;
 
             this._highlightIndex = -1;
-            this._cycleHighlight(); // Start immediately
+            this._cycleHighlight();
             this._suggestionInterval = setInterval(() => this._cycleHighlight(), 3250);
 
             this.debug('Onboarding suggestion cycle started');
@@ -1083,22 +1138,35 @@
                 return;
             }
 
-            // Remove highlight from all nodes
+            // Remove the highlight to trigger the CSS fade-out transition
             document.querySelectorAll('.file-node-content.onboarding-highlight')
                 .forEach(el => el.classList.remove('onboarding-highlight'));
 
-            // Advance to next
-            this._highlightIndex = (this._highlightIndex + 1) % nodes.length;
-            const target = nodes[this._highlightIndex];
-            target.classList.add('onboarding-highlight');
+            // Wait for the fade-out to register (400ms "breath" gap)
+            setTimeout(() => {
+                // Ensure the user didn't click anything during the 400ms wait
+                if (this._suggestionDismissed) return;
 
-            // Ensure parent category is expanded so the highlight is visible
-            const category = target.closest('.operation-category');
-            if (category && !category.classList.contains('expanded')) {
-                category.classList.add('expanded');
-                const opType = category.dataset.opType;
-                if (opType) this.expandedCategories.add(opType);
-            }
+                // Explicitly handle single vs multiple nodes
+                if (nodes.length === 1) {
+                    this._highlightIndex = 0;
+                } else {
+                    this._highlightIndex = (this._highlightIndex + 1) % nodes.length;
+                }
+
+                const target = nodes[this._highlightIndex];
+                
+                // Trigger the CSS fade-in
+                target.classList.add('onboarding-highlight');
+                
+                const category = target.closest('.operation-category');
+                // Ensure parent category is expanded so the highlight is visible
+                if (category && !category.classList.contains('expanded')) {
+                    category.classList.add('expanded');
+                    const opType = category.dataset.opType;
+                    if (opType) this.expandedCategories.add(opType);
+                }
+            }, 300); 
         }
 
         /**

@@ -46,6 +46,7 @@
       "drill": "#0066cc",
       "clearing": "#008844",
       "cutout": "#ff00ff",
+      "stencil": "#7c3aed",
       "toolpath": "#ff8844"
     },
     "canvas": {
@@ -62,7 +63,8 @@
         "isolation": "#ff8844",
         "drill": "#4488ff",
         "clearing": "#44ff88",
-        "cutout": "#444444"
+        "cutout": "#444444",
+        "stencil": "#860694"
       },
       "offset": {
         "external": "#a60000",

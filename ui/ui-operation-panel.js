@@ -190,8 +190,9 @@
             const pipelineType = window.pcbcam?.pipelineState?.type || 'cnc';
             const isLaser = window.pcbcam?.isLaserPipeline?.() || false;
 
-            // Remap CNC-originated stages to laser equivalents
-            if (isLaser && (geometryStage === 'strategy' || geometryStage === 'machine')) {
+            // Remap CNC-originated stages to laser/stencil equivalents
+            const isStencil = operation.type === 'stencil';
+            if ((isLaser || isStencil) && (geometryStage === 'strategy' || geometryStage === 'machine')) {
                 const isReady = window.pcbcam?.core?.isExportReady(operation);
                 geometryStage = isReady ? 'export_summary' : 'geometry';
             }
@@ -253,6 +254,21 @@
 
             this.attachEventHandlers(container);
             this.setupPropertyGridNavigation(container);
+
+            // Disable Drill Exclude if no drill operation is loaded
+            if (operation.type === 'stencil' && geometryStage === 'geometry') {
+                const hasDrill = this.core.operations.some(op => op.type === 'drill' && op.primitives && op.primitives.length > 0);
+                const excludeInput = document.getElementById('prop-stencilExcludeDrillPads');
+                
+                if (excludeInput) {
+                    excludeInput.disabled = !hasDrill;
+                    const wrapper = excludeInput.closest('.checkbox-label');
+                    if (wrapper) {
+                        wrapper.style.opacity = hasDrill ? '1' : '0.5';
+                        wrapper.title = hasDrill ? '' : 'No drill operations loaded. Add a drill file first.';
+                    }
+                }
+            }
         }
 
         createInvalidationPanel(operation) {
@@ -287,6 +303,9 @@
                     const fileNode = this.ui.navTreePanel.getNodeByOperationId(operation.id);
                     if (fileNode) {
                         this.ui.navTreePanel.updateFileGeometries(fileNode.id, operation);
+                        
+                        // Auto-select the newly generated elevated node
+                        this.ui.navTreePanel.selectHighestStage(fileNode.id);
                     }
                 }
 
@@ -316,6 +335,13 @@
         }
 
         getActionButtonText(stage, operationType) {
+            // Stencil — always 2-stage regardless of pipeline
+            if (operationType === 'stencil') {
+                if (stage === 'geometry') return 'Generate Stencil';
+                if (stage === 'export_summary') return 'Export Manager';
+                return null;
+            }
+
             const isLaser = window.pcbcam?.isLaserPipeline?.() || false;
 
             // Laser stages
@@ -469,11 +495,24 @@
         }
 
         createCheckboxField(field, param, value) {
-            // Clear the label already added
-            field.innerHTML = '';
+            const label = field.querySelector('label');
+            
+            // Safely rescue the tooltip icon DOM element before wiping the label
+            const icon = label.querySelector('.tooltip-trigger');
+            if (icon) {
+                label.removeChild(icon);
+            }
 
-            const label = document.createElement('label');
+            // Fetch the clean text directly from the dictionary (avoids the '?' text bug)
+            const labelText = this.lang.get('parameters.' + param.name, param.label);
+            
+            // Clear the label and set the class
+            label.textContent = ''; 
             label.className = 'checkbox-label';
+
+            // Remove the 'for' attribute — it was set by createField() for standard label+input pairs, but checkbox labels WRAP their input instead.
+            // Keeping 'for' causes the browser to redirect all clicks inside the label (including the tooltip trigger) to the checkbox input, stealing focus and preventing the tooltip from ever appearing.
+            label.removeAttribute('for');
 
             const input = document.createElement('input');
             input.type = 'checkbox';
@@ -481,11 +520,25 @@
             input.checked = value || false;
 
             const span = document.createElement('span');
-            span.textContent = param.label;
+            span.textContent = labelText;
 
+            // Reassemble the DOM
             label.appendChild(input);
             label.appendChild(span);
-            field.appendChild(label);
+            
+            // Re-insert the rescued tooltip icon with event isolation.
+            // Even with 'for' removed, the label still wraps the checkbox — clicks on any label descendant still toggle the input by default.
+            // Stop propagation so the tooltip trigger can receive focus and show its tooltip instead of toggling the checkbox.
+            if (icon) {
+                icon.addEventListener('mousedown', (e) => {
+                    e.stopPropagation();  // Prevent label from starting a click sequence
+                });
+                icon.addEventListener('click', (e) => {
+                    e.preventDefault();   // Prevent the label's default checkbox-toggle
+                    e.stopPropagation();  // Prevent the click from reaching the label
+                });
+                label.appendChild(icon);
+            }
         }
 
         createSelectField(field, param, value) {
@@ -773,6 +826,9 @@
                             const fileNode = this.ui.navTreePanel.getNodeByOperationId(operation.id);
                             if (fileNode) {
                                 this.ui.navTreePanel.updateFileGeometries(fileNode.id, operation);
+                                
+                                // Auto-select the newly generated elevated node
+                                this.ui.navTreePanel.selectHighestStage(fileNode.id);
                             }
                         }
 
@@ -829,6 +885,52 @@
             const stage = this.currentGeometryStage;
             const isLaser = window.pcbcam?.isLaserPipeline?.() || false;
             const transitionDelay = layoutConfig?.ui?.transitionDelay || 300;
+
+            // ═══════════════════════════════════════
+            // STENCIL PIPELINE (always 2-stage)
+            // ═══════════════════════════════════════
+            if (operation.type === 'stencil') {
+                if (stage === 'geometry') {
+                    await this.generateStencilPaths(operation);
+
+                    if (operation.offsets && operation.offsets.length > 0) {
+                        operation.exportReady = true;
+                        operation.exportMetadata = {
+                            generatedAt: Date.now(),
+                            sourceOffsets: operation.offsets.length,
+                            strategy: 'stencil'
+                        };
+
+                        this.ui.renderer?.setOptions({ showPreviews: true });
+                        const previewToggle = document.getElementById('show-previews');
+                        if (previewToggle) previewToggle.checked = true;
+
+                        await this.ui.updateRendererAsync();
+                        this.ui.showStatus('Stencil geometry generated — ready for export', 'success');
+                    }
+
+                    if (layoutConfig?.ui?.autoTransition) {
+                        setTimeout(() => {
+                            this.switchGeometryStage('export_summary');
+                        }, transitionDelay);
+                    }
+                    this.returnFocusToTree();
+                    return;
+                }
+
+                if (stage === 'export_summary') {
+                    const controller = window.pcbcam;
+                    if (controller?.modalManager) {
+                        const readyOps = this.ui.core.operations.filter(o => this.ui.core.isExportReady(o));
+                        if (readyOps.length === 0) {
+                            this.ui.showStatus('No operations ready. Generate stencil first.', 'warning');
+                            return;
+                        }
+                        controller.modalManager.showModal('exportManager', { operations: readyOps, highlightOperationId: operation.id });
+                    }
+                    return;
+                }
+            }
 
             // ═══════════════════════════════════════
             // LASER PIPELINE
@@ -921,6 +1023,9 @@
                         const fileNode = this.ui.navTreePanel.getNodeByOperationId(operation.id);
                         if (fileNode) {
                             this.ui.navTreePanel.updateFileGeometries(fileNode.id, operation);
+                            
+                            // Auto-select the newly generated elevated node
+                            this.ui.navTreePanel.selectHighestStage(fileNode.id);
                         }
                     }
 
@@ -1003,6 +1108,9 @@
                     const fileNode = this.ui.navTreePanel.getNodeByOperationId(operation.id);
                     if (fileNode) {
                         this.ui.navTreePanel.updateFileGeometries(fileNode.id, operation);
+                        
+                        // Auto-select the newly generated elevated node
+                        this.ui.navTreePanel.selectHighestStage(fileNode.id);
                     }
                 }
                 await this.ui.updateRendererAsync();
@@ -1028,6 +1136,9 @@
                     const fileNode = this.ui.navTreePanel.getNodeByOperationId(operation.id);
                     if (fileNode) {
                         this.ui.navTreePanel.updateFileGeometries(fileNode.id, operation);
+                        
+                        // Auto-select the newly generated elevated node
+                        this.ui.navTreePanel.selectHighestStage(fileNode.id);
                     }
                 }
                 await this.ui.updateRendererAsync();
@@ -1060,6 +1171,9 @@
                     const fileNode = this.ui.navTreePanel.getNodeByOperationId(operation.id);
                     if (fileNode) {
                         this.ui.navTreePanel.updateFileGeometries(fileNode.id, operation);
+                        
+                        // Auto-select the newly generated elevated node
+                        this.ui.navTreePanel.selectHighestStage(fileNode.id);
                     }
                 }
 
@@ -1068,6 +1182,37 @@
             } catch (error) {
                 console.error('[OperationPanel] Cutout offset failed:', error);
                 this.ui.showStatus('Failed: ' + error.message, 'error');
+            }
+        }
+
+        async generateStencilPaths(operation) {
+            const params = this.parameterManager.getAllParameters(operation.id);
+
+            this.ui.showCanvasSpinner('Generating stencil geometry...');
+            await new Promise(resolve => setTimeout(resolve, 10));
+
+            try {
+                await this.core.generateStencilGeometry(operation, params);
+
+                if (this.ui.navTreePanel) {
+                    const fileNode = this.ui.navTreePanel.getNodeByOperationId(operation.id);
+                    if (fileNode) {
+                        this.ui.navTreePanel.updateFileGeometries(fileNode.id, operation);
+                        
+                        // Auto-select the newly generated elevated node
+                        this.ui.navTreePanel.selectHighestStage(fileNode.id);
+                    }
+                }
+
+                await this.ui.updateRendererAsync();
+
+                const count = operation.offsets?.[0]?.primitives?.length || 0;
+                this.ui.showStatus(`Generated ${count} stencil aperture(s)`, 'success');
+            } catch (error) {
+                console.error('[OperationPanel] Stencil generation failed:', error);
+                this.ui.showStatus('Stencil generation failed: ' + error.message, 'error');
+            } finally {
+                this.ui.hideCanvasSpinner();
             }
         }
 
@@ -1109,7 +1254,6 @@
 
                 switch (strategy) {
                     case 'offset':
-                        // REVIEW - BECAUSE THERE'S NO SELF INTERSECTING SAFEGUARDS THIS ALMOST ALWAYS GENERATES CORRUPTED GEOMETRY - MAY NEED USER PASS INPUT UNTIL AUTOMATED
                         // Auto-calculate passes to fill the entire geometry with concentric inward offsets.
                         // Use half the largest dimension of the source geometry as the fill distance.
                         if (operation.bounds && stepDistance > 0) {
@@ -1193,20 +1337,21 @@
             container.innerHTML = '';
 
             // Summary section
+            const isStencil = operation.type === 'stencil';
+
             const section = document.createElement('div');
             section.className = 'property-section';
 
             const h3 = document.createElement('h3');
-            h3.textContent = 'Laser Export Summary';
+            h3.textContent = isStencil ? 'Stencil Export Summary' : 'Laser Export Summary';
             section.appendChild(h3);
 
             const summary = document.createElement('div');
             summary.className = 'exporter-summary-info';
 
-            const strategy = operation.settings?.laserClearStrategy || 'offset';
+            const strategy = isStencil ? 'stencil' : (operation.settings?.laserClearStrategy || 'offset');
             const offsetCount = operation.offsets?.length || 0;
             const primCount = operation.offsets?.reduce((sum, o) => sum + (o.primitives?.length || 0), 0) || 0;
-            const previewReady = this.core.isExportReady(operation) ? 'Yes' : 'No';
 
             summary.innerHTML = `
                 <div><strong>Operation:</strong> ${operation.type}</div>
@@ -1265,6 +1410,9 @@
                 const fileNode = this.ui.navTreePanel.getNodeByOperationId(operation.id);
                 if (fileNode) {
                     this.ui.navTreePanel.updateFileGeometries(fileNode.id, operation);
+                    
+                    // Auto-select the newly generated elevated node
+                    this.ui.navTreePanel.selectHighestStage(fileNode.id);
                 }
             }
             await this.ui.updateRendererAsync();

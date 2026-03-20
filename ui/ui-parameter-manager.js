@@ -58,12 +58,13 @@
                 // CNC PIPELINE PARAMETERS
                 // ═══════════════════════════════════════
 
-                // 1: Geometry
+                // Geometry
                 tool: {
                     type: 'select',
                     label: 'Tool',
                     stage: 'geometry',
-                    category: 'tool'
+                    category: 'tool',
+                    operationTypes: ['isolation', 'clearing', 'cutout', 'drill']
                 },
                 toolDiameter: {
                     type: 'number',
@@ -73,7 +74,8 @@
                     min: 0.01, // connect to config
                     ...validationRules.toolDiameter,
                     stage: 'geometry',
-                    category: 'tool'
+                    category: 'tool',
+                    operationTypes: ['isolation', 'clearing', 'cutout', 'drill']
                 },
                 passes: {
                     type: 'number',
@@ -97,7 +99,8 @@
                     label: 'Combine Passes',
                     default: true,
                     stage: 'geometry',
-                    category: 'offset'
+                    category: 'offset',
+                    operationTypes: ['isolation', 'clearing', 'cutout']
                 },
                 millHoles: {
                     type: 'checkbox',
@@ -117,7 +120,7 @@
                     operationType: 'cutout'
                 },
 
-                // 2: Strategy
+                // Strategy
                 cutDepth: {
                     type: 'number',
                     label: 'Cut Depth',
@@ -227,7 +230,7 @@
                     operationType: 'cutout'
                 },  
 
-                // 3: Machine
+                // Machine
                 feedRate: {
                     type: 'number',
                     label: 'Feed Rate',
@@ -393,6 +396,73 @@
                     category: 'laser_cutout',
                     pipelineType: 'laser',
                     operationTypes: ['cutout', 'drill']
+                },
+
+                // ═══════════════════════════════════════
+                // STENCIL PIPELINE PARAMETERS
+                // ═══════════════════════════════════════
+
+                stencilOffset: {
+                    type: 'number',
+                    label: 'Aperture Offset',
+                    unit: 'mm',
+                    step: 0.01,
+                    min: -1.0,
+                    max: 1.0,
+                    default: -0.05,
+                    stage: 'geometry',
+                    category: 'stencil',
+                    operationType: 'stencil'
+                },
+                stencilIgnoreRegions: {
+                    type: 'checkbox',
+                    label: 'Ignore Solid Regions (Pads Only)',
+                    default: true,
+                    stage: 'geometry',
+                    category: 'stencil',
+                    operationType: 'stencil'
+                },
+                stencilExcludeDrillPads: {
+                    type: 'checkbox',
+                    label: 'Exclude Pads Over Drill Holes',
+                    default: true,
+                    stage: 'geometry',
+                    category: 'stencil',
+                    operationType: 'stencil'
+                },
+                stencilAddRegHoles: {
+                    type: 'checkbox',
+                    label: 'Add Registration Holes',
+                    default: false,
+                    stage: 'geometry',
+                    category: 'stencil',
+                    operationType: 'stencil'
+                },
+                stencilRegDiameter: {
+                    type: 'number',
+                    label: 'Registration Hole Diameter',
+                    unit: 'mm',
+                    step: 0.1,
+                    min: 0.5,
+                    max: 10.0,
+                    default: 3.0,
+                    stage: 'geometry',
+                    category: 'stencil',
+                    operationType: 'stencil',
+                    conditional: 'stencilAddRegHoles'
+                },
+                stencilRegMargin: {
+                    type: 'number',
+                    label: 'Registration Hole Margin',
+                    unit: 'mm',
+                    step: 0.5,
+                    min: 1.0,
+                    max: 25.0,
+                    default: 5.0,
+                    stage: 'geometry',
+                    category: 'stencil',
+                    operationType: 'stencil',
+                    conditional: 'stencilAddRegHoles'
                 }
             };
         }
@@ -715,9 +785,13 @@
                 // Array operationTypes filter (must be one of listed types)
                 if (def.operationTypes && !def.operationTypes.includes(operationType)) continue;
 
-                // Pipeline filtering: laser params only in laser mode, CNC params only in CNC mode
-                if (def.pipelineType === 'laser' && !isLaser) continue;
-                if (!def.pipelineType && isLaser) continue;
+                // Pipeline filtering: laser params only in laser mode, CNC params only in CNC mode.
+                // Stencil params have no pipelineType and operationType === 'stencil', so they pass through regardless of pipeline.
+                const isStencilParam = def.operationType === 'stencil';
+                if (!isStencilParam) {
+                    if (def.pipelineType === 'laser' && !isLaser) continue;
+                    if (!def.pipelineType && isLaser) continue;
+                }
 
                 // Hide clearing-related params if exporting to PNG
                 if (isLaser && exportFormat === 'png') {
@@ -744,8 +818,8 @@
         /**
          * Returns the valid stages for a given pipeline type.
          */
-        getStagesForPipeline(pipelineType) {
-            if (pipelineType === 'laser') {
+        getStagesForPipeline(pipelineType, operationType) {
+            if (pipelineType === 'laser' || operationType === 'stencil') {
                 return ['geometry', 'export_summary'];
             }
             // CNC and hybrid use the standard three stages
@@ -756,8 +830,8 @@
          * Returns the next stage in the pipeline after the given one.
          * Returns null if the current stage is the last one.
          */
-        getNextStage(currentStage, pipelineType) {
-            const stages = this.getStagesForPipeline(pipelineType);
+        getNextStage(currentStage, pipelineType, operationType) {
+            const stages = this.getStagesForPipeline(pipelineType, operationType);
             const idx = stages.indexOf(currentStage);
             if (idx === -1 || idx >= stages.length - 1) return null;
             return stages[idx + 1];
@@ -845,6 +919,17 @@
                 defaults.laserClearStrategy = opLaserDefaults.clearStrategy;
                 defaults.laserHatchAngle = opLaserDefaults.hatchAngle;
                 defaults.laserCutSide = opLaserDefaults.cutSide;
+            }
+
+            // Stencil defaults — merge from operation config
+            if (operationType === 'stencil') {
+                const stencilSettings = config.operations?.stencil?.defaultSettings || {};
+                defaults.stencilOffset = stencilSettings.stencilOffset ?? -0.05;
+                defaults.stencilIgnoreRegions = stencilSettings.stencilIgnoreRegions ?? true;
+                defaults.stencilExcludeDrillPads = stencilSettings.stencilExcludeDrillPads ?? true;
+                defaults.stencilAddRegHoles = stencilSettings.stencilAddRegHoles ?? false;
+                defaults.stencilRegDiameter = stencilSettings.regHoleDiameter ?? 3.0;
+                defaults.stencilRegMargin = stencilSettings.regHoleMargin ?? 5.0;
             }
 
             return defaults;

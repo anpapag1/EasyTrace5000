@@ -36,7 +36,7 @@ window.PCBCAMConfig = {
         isolation: {
             name: 'Isolation Routing',
             icon: '🎯',
-            extensions: ['.gbr', '.ger', '.gtl', '.gbl', '.gts', '.gbs', '.svg'],
+            extensions: ['.gbr', '.ger', '.gtl', '.gbl', '.gbs', '.svg'],
             defaultTool: 'em_0.2mm_flat',  // Tool ID - diameter comes from tools.json
             cutting: {
                 cutDepth: -0.04,
@@ -119,6 +119,20 @@ window.PCBCAMConfig = {
                 entryType: 'plunge',
                 cutSide: 'outside'
             }
+        },
+        stencil: {
+            name: 'Solder Stencil',
+            extensions: ['.gtp', '.gbp', '.gts', '.gbs', '.gbr', '.ger', '.svg'],
+            defaultTool: null,
+            cutting: null,
+            defaultSettings: {
+                stencilOffset: -0.08,
+                stencilIgnoreRegions: true,
+                stencilExcludeDrillPads: true,
+                stencilAddRegHoles: false,
+                stencilRegDiameter: 3.0,
+                stencilRegMargin: 5.0
+            }
         }
     },
 
@@ -144,7 +158,8 @@ window.PCBCAMConfig = {
             isolation: '#ff0000', // Red
             drill:     '#0000ff', // Blue
             clearing:  '#00ff00', // Green
-            cutout:    '#000000'  // Black
+            cutout:    '#000000',  // Black
+            stencil:   '#860694'
         },
         outputFormat: 'svg', // 'svg' | 'png'
         rasterDPI: 1000, // Some DPI parameters may be needed when exporting svg's as some softwares can assume wrong values if not present.
@@ -766,6 +781,7 @@ window.PCBCAMConfig = {
                 strategy: 'Cutting Strategy',
                 drill: 'Drilling Parameters',
                 cutout: 'Cutout Settings',
+                stencil: 'Stencil Settings',
                 machine: 'Machine Configuration',
                 general: 'General Settings',
                 laser_tool: 'Laser Tool',

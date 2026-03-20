@@ -391,7 +391,13 @@
         "laserStepOver": "Percentage of the spot diameter that adjacent paths overlap. Lower values (more overlap) give better copper removal but increase processing time. 50% is a good starting point; reduce to 30% if streaks appear.",
         "laserClearStrategy": "How the laser fills areas that need copper removal.\n\n• Filled Polygon: Exports solid shapes — your laser software handles the fill pattern. SVG only.\n• Offset Paths: Concentric paths shrinking inward. Most reliable for streak prevention.\n• Parallel Hatch: Straight lines at a fixed angle. Fast but single-direction.\n• Cross-Hatch: Two perpendicular sets of lines. Best coverage, longest processing time.",
         "laserHatchAngle": "Angle of the hatch lines in degrees. For parallel hatch, lines run at this angle. For cross-hatch, the second set runs perpendicular (angle + 90°). 45° is a good default — it crosses both horizontal and vertical traces.",
-        "laserCutSide": "Where the laser kerf falls relative to the board outline.\n\n• Outside: Laser cuts outside the line (board stays full size).\n• Inside: Laser cuts inside the line (board shrinks by kerf).\n• On Line: Laser follows the exact line (board shrinks by half the kerf on each side)."
+        "laserCutSide": "Where the laser kerf falls relative to the board outline.\n\n• Outside: Laser cuts outside the line (board stays full size).\n• Inside: Laser cuts inside the line (board shrinks by kerf).\n• On Line: Laser follows the exact line (board shrinks by half the kerf on each side).",
+        "stencilOffset": "Shrinks (negative) or expands (positive) the stencil apertures. -0.05mm is a common default to prevent solder bridging.",
+        "stencilIgnoreRegions": "If checked, ignores large copper pours and traces, only generating apertures for actual component pads (flashes).",
+        "stencilExcludeDrillPads": "Automatically removes stencil apertures that sit directly over through-holes to prevent solder paste from falling into the holes.",
+        "stencilAddRegHoles": "Generates 4 circular alignment holes outside the board boundaries to help pin the stencil in place during manual application.",
+        "stencilRegDiameter": "The physical diameter of the registration pins/dowels you plan to use.",
+        "stencilRegMargin": "How far outside the calculated board boundary to place the registration holes."
       },
       "originControls": {
         "originOffset": "Set a new X/Y origin. Click 'Apply Origin' to save this position as the new (0,0).",
@@ -415,7 +421,8 @@
         "laserSpotSize": "The effective cut width (kerf) of your laser beam on copper. Measure by making a single test line and measuring the actual ablated width. Typical values: UV laser 0.02-0.08mm, Fiber laser 0.03-0.15mm, CO2 laser 0.1-0.3mm.",
         "laserExportFormat": "SVG exports vector paths that laser software (LightBurn, RDWorks) interprets with its own power/speed settings per color layer. PNG exports a raster image at the specified DPI — useful for direct image engraving modes.",
         "laserExportDPI": "Resolution of the exported PNG image. Higher DPI gives finer detail but larger file size. 1000 DPI is suitable for most PCB work. Match this to your laser software's engraving resolution setting.",
-        "laserClearStrategy": "Default clearing strategy for new operations. Can be overridden per-operation in the parameter panel. Offset Paths is recommended as a safe default — it guarantees overlap between passes without relying on external software."
+        "laserClearStrategy": "Default clearing strategy for new operations. Can be overridden per-operation in the parameter panel. Offset Paths is recommended as a safe default — it guarantees overlap between passes without relying on external software.",
+        "stencilExportPadding": "Physical margin (in mm) added around the stencil geometry in the exported SVG. Provides breathing room for alignment on vinyl cutters and laser plotters."
       },
       "vizPanel": {
         "grid": "Toggle the visibility of the canvas grid.",

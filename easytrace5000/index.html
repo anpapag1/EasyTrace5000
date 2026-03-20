@@ -152,7 +152,7 @@
                 "Optimized toolpaths with staydown clustering and G2/G3 arc reconstruction",
                 "Multiple CNC post-processors supported (GRBL, Marlin, LinuxCNC, Roland RML)"
             ],
-            "softwareVersion": "1.1.1",
+            "softwareVersion": "1.1.2",
             "releaseNotes": "https://github.com/RicardoJCMarques/EasyTrace5000/blob/main/CHANGELOG.md",
             "downloadUrl": "https://github.com/RicardoJCMarques/EasyTrace5000/",
             "installUrl": "https://cam.eltryus.design/easytrace5000/",
@@ -389,6 +389,27 @@
                             </button>
                         </div>
                         <div class="category-files"></div>
+                    </div>
+                    <div class="operation-category" data-op-type="stencil">
+                        <div class="category-header" tabindex="-1" role="treeitem" aria-level="1">
+                            <span class="tree-expand-icon">▶</span>
+                            <span class="category-icon">
+                                <svg aria-hidden="true" width="20" height="20" viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round">
+                                    <rect x="2" y="3" width="16" height="14" rx="1.5"/>
+                                    <rect x="4.5" y="5.5" width="2.5" height="2" rx="0.5"/>
+                                    <rect x="8.75" y="5.5" width="2.5" height="2" rx="0.5"/>
+                                    <rect x="13" y="5.5" width="2.5" height="2" rx="0.5"/>
+                                    <circle cx="5.75" cy="13" r="1.25"/>
+                                    <circle cx="10" cy="13" r="1.25"/>
+                                    <circle cx="14.25" cy="13" r="1.25"/>
+                                    <circle cx="2" cy="10" r="0.75" fill="currentColor" stroke="none"/>
+                                    <circle cx="18" cy="10" r="0.75" fill="currentColor" stroke="none"/>
+                                </svg>
+                            </span>
+                            <span class="category-label">Solder Stencil (Experimental)</span>
+                            <button class="btn btn--icon btn--compact add-file-btn" data-op-type="stencil" title="Add Stencil File" aria-label="Add Stencil File">+</button>
+                        </div>
+                        <div class="category-files" role="group"></div>
                     </div>
                 </div>
             </div>
@@ -788,7 +809,7 @@
         </div>
         <div class="status-right" id="status-right">
             <div class="status-info license-info">
-                <span title="Version">Version 1.1.1</span> |
+                <span title="Version">Version 1.1.2</span> |
                 <a href="/" title="Return to Homepage" draggable="false">Home</a> |
                 <a href="../LICENSE" target="_blank" title="View License" draggable="false" aria-label="View License (opens in a new tab)">AGPLv3 Licensed</a> |
                 <a href="doc/" target="_blank" title="Documentation" draggable="false" aria-label="Documentation (opens in a new tab)">Doc</a> |
@@ -1087,7 +1108,7 @@
                                 <span class="zone-types" aria-hidden="true">.gbr, .gtl, .gbl, .svg</span>
                                 <span class="zone-hint" aria-hidden="true">Click or drop</span>
                                 <span class="zone-file"></span>
-                                <input type="file" accept=".gbr,.ger,.gtl,.gbl,.gts,.gbs,.svg" hidden>
+                                <input type="file" accept=".gbr,.ger,.gtl,.gbl,.gbs,.svg" hidden>
                             </div>
 
                             <div class="quickstart-drop-zone" data-op-type="drill" id="qs-drill-zone" role="button" tabindex="0" aria-label="Upload Drilling File. Click or drag file here.">
@@ -1387,12 +1408,12 @@
                     <div id="exporter-shared-options">
                         <div class="property-field field-group">
                             <label class="checkbox-label">
-                                <input type="checkbox" id="exporter-single-file" checked>
+                                <input type="checkbox" id="exporter-single-file">
                                 <span>Export as single file (combines operations)</span>
                             </label>
                             <div class="property-field field-group" id="exporter-split-drills-field">
                                 <label class="checkbox-label">
-                                    <input type="checkbox" id="exporter-split-drills" checked disabled>
+                                    <input type="checkbox" id="exporter-split-drills">
                                     <span>Split drill files by hole diameter</span>
                                 </label>
                             </div>
@@ -1503,6 +1524,19 @@
                             </div>
                         </div>
                     </div>
+
+                    <div id="exporter-stencil-options" class="is-hidden">
+                        <h3>Stencil Export Options</h3>
+                        <div class="laser-settings-grid">
+                            <div class="property-field field-group">
+                                <label for="stencil-exporter-padding">Export Margin Padding</label>
+                                <div class="input-unit">
+                                    <input type="number" id="stencil-exporter-padding" value="5" step="0.5" min="0" max="20" aria-label="Padding around the stencil bounds in mm">
+                                    <span class="unit" aria-hidden="true">mm</span>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
                 </div>
 
                 <div class="exporter-preview" id="exporter-cnc-preview" data-pipeline-group="cnc">
@@ -1594,7 +1628,7 @@
     <!-- Initialization -->
     <script>
         document.addEventListener('DOMContentLoaded', function() {
-            console.log('EasyTrace5000 Advanced Workspace v1.1.1');
+            console.log('EasyTrace5000 Advanced Workspace v1.1.2');
 
             const loadingText = document.getElementById('loading-text');
             const loadingProgress = document.getElementById('loading-progress');

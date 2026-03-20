@@ -38,7 +38,7 @@
      *   strokeWidth: 0.05,          // laser spot size in mm (used for PNG min-width only)
      *   passes: [{
      *     passIndex: 1,
-     *     type: 'offset' | 'filled' | 'hatch' | 'drill',
+     *     type: 'offset' | 'filled' | 'hatch' | 'drill' | 'stencil',
      *     primitives: PathPrimitive[] | CirclePrimitive[],
      *     metadata: { isHatch, angle, strategy, ... }
      *   }]

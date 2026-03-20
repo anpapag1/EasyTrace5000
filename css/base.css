@@ -118,7 +118,7 @@ html {
     --touch-target-compact: 2.25rem;  /* 36px */
     
     /* Modal Dimensions */
-    --modal-max-width: min(700px, 95vw);
+    --modal-max-width: min(850px, 95vw);
     --modal-max-height: calc(var(--vh-small) - var(--spacing-xl) * 2);
     --modal-padding-block: var(--spacing-lg);
     --modal-padding-inline: var(--spacing-lg);
@@ -330,4 +330,13 @@ svg polyline {
 svg[fill="currentColor"] {
     fill: currentColor;
     stroke: none;
+}
+
+/* ============================================================================
+   Random Fixes
+   ============================================================================ */
+
+.checkbox-label span:not(.tooltip-trigger),
+.radio-label span:not(.tooltip-trigger) {
+    pointer-events: none; /* Fixes Safari checkbox toggle bug */
 }

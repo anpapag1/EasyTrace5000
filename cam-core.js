@@ -275,7 +275,7 @@
                 warnings: null,
                 expanded: false,
                 processed: false,
-                color: fileType?.color || opConfig.color,
+                color: fileType?.color,
                 geometricContext: {
                     hasArcs: false,
                     hasCircles: false,
@@ -1722,6 +1722,168 @@
             }
 
             return strategyPrimitives;
+        }
+
+        async generateStencilGeometry(operation, settings) {
+            this.debug(`=== STENCIL GEOMETRY GENERATION ===`);
+            await this.ensureProcessorReady();
+
+            if (!operation.primitives || operation.primitives.length === 0) {
+                return [];
+            }
+
+            // Filter primitives based on user settings
+            let primitivesToProcess;
+
+            if (settings.stencilIgnoreRegions) {
+                primitivesToProcess = operation.primitives.filter(prim => {
+                    const props = prim.properties || {};
+                    if (props.isFlash || props.isPad) return true;
+                    if (prim.type === 'circle' || prim.type === 'rectangle' || prim.type === 'obround') return true;
+                    if (props.isTrace || props.stroke) return false;
+                    if (prim.type === 'path' && props.fill && !props.isFlash) return false;
+                    return false;
+                });
+                this.debug(`Filtered primitives: ${operation.primitives.length} → ${primitivesToProcess.length}`);
+            } else {
+                primitivesToProcess = [...operation.primitives];
+            }
+
+            // Exclude pads that overlap drill holes (soldermask around through-hole pins)
+            if (settings.stencilExcludeDrillPads && primitivesToProcess.length > 0) {
+                // Collect all drill hole centers and radii from drill operations
+                const drillHoles = [];
+                for (const op of this.operations) {
+                    if (op.type !== 'drill' || !op.primitives) continue;
+                    for (const prim of op.primitives) {
+                        if (prim.properties?.role === 'drill_hole' && prim.center && prim.radius) {
+                            drillHoles.push({ x: prim.center.x, y: prim.center.y, r: prim.radius });
+                        }
+                    }
+                }
+
+                if (drillHoles.length > 0) {
+                    const beforeCount = primitivesToProcess.length;
+                    primitivesToProcess = primitivesToProcess.filter(prim => {
+                        // Get a representative center point for this pad
+                        const rep = GeometryUtils.getRepresentativePoint(prim);
+                        if (!rep) return true; // Keep if position can't determined
+
+                        // Check if any drill hole center is inside or very close to this pad's center
+                        for (const hole of drillHoles) {
+                            const dist = Math.hypot(rep.x - hole.x, rep.y - hole.y);
+                            // If the drill hole center is within the pad's bounding radius, exclude it
+                            const bounds = prim.getBounds();
+                            const padRadius = Math.max(bounds.maxX - bounds.minX, bounds.maxY - bounds.minY) / 2;
+                            if (dist < padRadius * 0.8) {
+                                return false; // Drill hole overlaps this pad, exclude it
+                            }
+                        }
+                        return true;
+                    });
+                    this.debug(`Drill hole exclusion: ${beforeCount} → ${primitivesToProcess.length} (removed ${beforeCount - primitivesToProcess.length})`);
+                }
+            }
+
+            // Apply shrink/grow offset
+            let processedGeometry = [];
+            const offsetDist = settings.stencilOffset || 0;
+
+            if (Math.abs(offsetDist) > config.precision.coordinate && this.geometryOffsetter) {
+                this.debug(`Applying stencil offset: ${offsetDist.toFixed(3)}mm`);
+
+                for (const prim of primitivesToProcess) {
+                    const offsetResult = await this.geometryOffsetter.offsetPrimitive(prim, offsetDist);
+                    if (offsetResult) {
+                        if (Array.isArray(offsetResult)) {
+                            processedGeometry.push(...offsetResult);
+                        } else {
+                            processedGeometry.push(offsetResult);
+                        }
+                    }
+                }
+
+                // Union to clean up any self-intersections from shrinking
+                if (processedGeometry.length > 1 && this.geometryProcessor) {
+                    try {
+                        processedGeometry = await this.geometryProcessor.unionGeometry(processedGeometry);
+                    } catch (e) {
+                        this.debug(`Union after offset failed: ${e.message}, using raw offset results`);
+                    }
+                }
+            } else {
+                // No offset — use primitives as-is, but ensure they are standardized paths for the exporter
+                for (const prim of primitivesToProcess) {
+                    if (prim.type === 'path') {
+                        processedGeometry.push(prim);
+                    } else {
+                        const pathPrim = GeometryUtils.primitiveToPath(prim);
+                        if (pathPrim) {
+                            processedGeometry.push(pathPrim);
+                        }
+                    }
+                }
+            }
+
+            // Add registration holes (appended after union so they stay as clean circles)
+            if (settings.stencilAddRegHoles) {
+                const bounds = this.coordinateSystem?.boardBounds || operation.bounds;
+                if (bounds && isFinite(bounds.minX)) {
+                    const margin = settings.stencilRegMargin || 5.0;
+                    const radius = (settings.stencilRegDiameter || 3.0) / 2;
+
+                    const corners = [
+                        { x: bounds.minX - margin, y: bounds.minY - margin },
+                        { x: bounds.maxX + margin, y: bounds.minY - margin },
+                        { x: bounds.minX - margin, y: bounds.maxY + margin },
+                        { x: bounds.maxX + margin, y: bounds.maxY + margin }
+                    ];
+
+                    for (const center of corners) {
+                        const regHole = new CirclePrimitive(center, radius, {
+                            polarity: 'dark',
+                            isRegistration: true,
+                            role: 'registration_hole',
+                            operationId: operation.id
+                        });
+                        // Keep as CirclePrimitive — both the renderer and LaserImageExporter handle circles natively
+                        processedGeometry.push(regHole);
+                    }
+                    this.debug(`Added 4 registration holes (r=${radius.toFixed(2)}mm, margin=${margin}mm)`);
+                } else {
+                    console.warn('[Core] Cannot add registration holes: board bounds not available');
+                }
+            }
+
+            // Tag as machine paths (stroked outlines, no fill — like cutout offsets)
+            processedGeometry.forEach(p => {
+                if (!p.properties) p.properties = {};
+                p.properties.operationType = 'stencil';
+                p.properties.operationId = operation.id;
+                p.properties.fill = false;
+                p.properties.stroke = true;
+                p.properties.strokeWidth = 1;
+                p.properties.isOffset = true;
+                p.properties.offsetType = 'external';
+            });
+
+            operation.offsets = [{
+                distance: offsetDist,
+                pass: 1,
+                type: 'stencil',
+                primitives: processedGeometry,
+                metadata: {
+                    strategy: 'offset',
+                    isStencil: true,
+                    finalCount: processedGeometry.length,
+                    generatedAt: Date.now()
+                }
+            }];
+
+            this.isToolpathCacheValid = false;
+            this.debug(`Stencil generation complete: ${processedGeometry.length} primitives`);
+            this.debug(`=== STENCIL GEOMETRY COMPLETE ===`);
+            return operation.offsets;
         }
 
         async generateDrillStrategy(operation, settings) {

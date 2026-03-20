@@ -71,6 +71,7 @@
     --color-operation-drill: #4488ff;
     --color-operation-clearing: #44ff88;
     --color-operation-cutout: #ff00ff;
+    --color-operation-stencil: #6d0079;
     --color-operation-toolpath: #00ffff;
 
     /* Canvas Colors */
@@ -93,6 +94,7 @@
     --color-geometry-source-drill: #4488ff;
     --color-geometry-source-clearing: #44ff88;
     --color-geometry-source-cutout: #333333;
+    --color-geometry-source-stencil: #6d0079;
     --color-geometry-offset-external: #a60000;
     --color-geometry-offset-internal: #00a600;
     --color-geometry-offset-on: #bcbc02;

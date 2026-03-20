@@ -43,7 +43,8 @@
                 isolation: '../examples/exampleSMD1/isolation.gbr',
                 drill: '../examples/exampleSMD1/drill.drl',
                 clearing: '../examples/exampleSMD1/clearing.gbr',
-                cutout: '../examples/exampleSMD1/cutout.gbr'
+                cutout: '../examples/exampleSMD1/cutout.gbr',
+                stencil: '../examples/exampleSMD1/stencil.gbr',
             }
         },
         'exampleThroughHole1': {
@@ -98,7 +99,8 @@
                 isolation: null,
                 drill: null,
                 clearing: null,
-                cutout: null
+                cutout: null,
+                stencil: null
             };
 
             // Queued files for processing
@@ -189,7 +191,7 @@
             const state = this.pipelineState;
 
             if (state.type === 'cnc') {
-                return ['isolation', 'drill', 'clearing', 'cutout'];
+                return ['isolation', 'drill', 'clearing', 'cutout', 'stencil'];
             }
 
             // Laser ops — always available
@@ -214,6 +216,9 @@
                 if (!ops.includes('cutout')) ops.push('cutout');
             }
 
+            // Stencil is always available regardless of pipeline
+            ops.push('stencil');
+
             return ops;
         }
 
@@ -225,9 +230,11 @@
         }
         
         /**
-         * Returns true if this specific operation type should use laser export in the current pipeline. CNC ops in Hybrid mode may use G-code instead.
+         * Returns true if this specific operation type should use laser SVG export in the current pipeline. Stencils are routed independently — they use the same LaserImageExporter backend but have their own UI and hardcoded settings.
          */
         isLaserExportForOperation(operationType) {
+            // Stencils are NOT laser operations — they have their own export path
+            if (operationType === 'stencil') return false;
             if (this.pipelineState.type === 'laser') return true;
             if (this.pipelineState.type === 'hybrid') {
                 return operationType === 'isolation' || operationType === 'clearing';
@@ -860,7 +867,8 @@
                 isolation: null,
                 drill: null,
                 clearing: null,
-                cutout: null
+                cutout: null,
+                stencil: null
             };
 
             // Ensure coordinate system is initialized after file upload
@@ -1414,12 +1422,21 @@
                     metadata: offset.metadata || {}
                 }));
 
+                // Build a descriptive layer name for the SVG output.
+                // Stencils include the source filename so that top-paste and bottom-paste stencils get distinct Inkscape layer labels (e.g. "Stencil_paste_top" vs "Stencil_paste_bottom").
+                const isStencil = op.type === 'stencil';
+                let layerName = op.type;
+                if (isStencil) {
+                    const cleanName = op.file.name.replace(/\.[^.]+$/, '').replace(/[^a-zA-Z0-9_-]/g, '_');
+                    layerName = `Stencil_${cleanName}`;
+                }
+
                 return {
                     operationId: op.id,
                     operationType: op.type,
                     fileName: op.file.name,
                     baseColor: color,
-                    layerName: op.type,
+                    layerName: layerName,
                     strokeWidth: spotSize,
                     passes
                 };
@@ -1461,14 +1478,18 @@
                     layerGroups = [];
                 }
             } else {
-                // Multi-file: one SVG per operation
+                // Multi-file: one file per operation
                 layerGroups = [];
                 for (const op of operations) {
                     const layer = buildLayer(op);
                     if (!layer) continue;
+
+                    // Respect PNG format for rasterizable operations
+                    const isRasterOp = isPNGFormat && rasterTypes.includes(op.type);
+
                     layerGroups.push({
                         layers: [layer],
-                        format: 'svg',
+                        format: isRasterOp ? 'png' : 'svg',
                         suffix: `-${op.type}`
                     });
                 }

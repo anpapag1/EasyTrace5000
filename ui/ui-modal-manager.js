@@ -164,7 +164,7 @@
             const hint = document.getElementById('exporter-split-drills-hint');
             if (!checkbox) return;
 
-            const isSingleFile = document.getElementById('exporter-single-file')?.checked !== false;
+            const isSingleFile = document.getElementById('exporter-single-file')?.checked === true;
 
             if (isSingleFile) {
                 checkbox.disabled = true;
@@ -843,9 +843,10 @@
                     case 'isolation': return 1;
                     case 'laser_isolation': return 1;
                     case 'clearing':  return 2;
-                    case 'drill':     return 3;
-                    case 'cutout':    return 4;
-                    default:          return 5; 
+                    case 'stencil':   return 3;
+                    case 'drill':     return 4;
+                    case 'cutout':    return 5;
+                    default:          return 6;
                 }
             };
 
@@ -853,12 +854,20 @@
             this.highlightedOpId = highlightOperationId;
 
             // Check which operations actually exist in this job
-            this.jobHasLaser = this.selectedOperations.some(op => this.controller.isLaserExportForOperation(op.type));
-            this.jobHasCNC = this.selectedOperations.some(op => !this.controller.isLaserExportForOperation(op.type));
+            this.jobHasLaser = this.selectedOperations.some(
+                op => this.controller.isLaserExportForOperation(op.type)
+            );
+            this.jobHasCNC = this.selectedOperations.some(
+                op => !this.controller.isLaserExportForOperation(op.type) && op.type !== 'stencil'
+            );
+            this.jobHasStencil = this.selectedOperations.some(
+                op => op.type === 'stencil'
+            );
 
             const laserOptions = document.getElementById('exporter-laser-options');
             const cncOptions = document.getElementById('exporter-cnc-options');
             const cncPreview = document.getElementById('exporter-cnc-preview');
+            const stencilOptions = document.getElementById('exporter-stencil-options');
             const leftColumnWrapper = document.querySelector('.gcode-options');
 
             // Set the MACRO layout based on the job contents.
@@ -866,6 +875,7 @@
             if (laserOptions) laserOptions.classList.toggle('is-hidden', !this.jobHasLaser);
             if (cncOptions) cncOptions.classList.toggle('is-hidden', !this.jobHasCNC);
             if (cncPreview) cncPreview.classList.toggle('is-hidden', !this.jobHasCNC);
+            if (stencilOptions) stencilOptions.classList.toggle('is-hidden', !this.jobHasStencil);
 
             // Update the calculate button text and visibility based on job contents
             const calcBtn = document.getElementById('exporter-calculate-btn');
@@ -876,7 +886,7 @@
 
             // Fix the grid sizing if CNC preview is completely gone
             if (leftColumnWrapper) {
-                leftColumnWrapper.classList.toggle('is-full-width', this.jobHasLaser && !this.jobHasCNC);
+                leftColumnWrapper.classList.toggle('is-full-width', !this.jobHasCNC);
             }
 
             this.populateExportOperationsList();
@@ -884,49 +894,59 @@
             this.updateSplitDrillVisibility();
             this.setupExportHandlers();
 
-            // Wire PNG warning and DPI visibility to the machine laser export format setting
-            const laserFormat = window.pcbcam?.core?.settings?.laser?.exportFormat || 'svg';
-            
-            const pngWarning = document.getElementById('laser-png-warning');
-            if (pngWarning) pngWarning.style.display = laserFormat === 'png' ? '' : 'none';
+            // Laser specific init (only if laser ops present)
+            if (this.jobHasLaser) {
+                const laserFormat = window.pcbcam?.core?.settings?.laser?.exportFormat || 'svg';
 
-            const dpiField = document.getElementById('laser-dpi-field');
-            if (dpiField) dpiField.style.display = laserFormat === 'png' ? '' : 'none';
+                const pngWarning = document.getElementById('laser-png-warning');
+                if (pngWarning) pngWarning.style.display = laserFormat === 'png' ? '' : 'none';
 
-            // Populate padding and DPI from settings
-            const laserSettings = this.controller.core?.settings?.laser || {};
-            
-            const paddingInput = document.getElementById('laser-exporter-padding');
-            if (paddingInput) {
-                paddingInput.value = laserSettings.exportPadding ?? config.laserDefaults?.exportPadding ?? 5.0;
+                const dpiField = document.getElementById('laser-dpi-field');
+                if (dpiField) dpiField.style.display = laserFormat === 'png' ? '' : 'none';
+
+                // Populate padding and DPI from settings
+                const laserSettings = this.controller.core?.settings?.laser || {};
+
+                const paddingInput = document.getElementById('laser-exporter-padding');
+                if (paddingInput) {
+                    paddingInput.value = laserSettings.exportPadding ?? config.laserDefaults?.exportPadding ?? 5.0;
+                }
+
+                const dpiInput = document.getElementById('laser-exporter-dpi');
+                if (dpiInput) {
+                    dpiInput.value = laserSettings.exportDPI ?? config.laserDefaults?.rasterDPI ?? 1000;
+                }
+
+                // Initialize laser export UI controls to defaults
+                const cutOrderSelect = document.getElementById('laser-cut-order');
+                if (cutOrderSelect) cutOrderSelect.value = 'normal';
+
+                const svgGroupingSelect = document.getElementById('laser-svg-grouping');
+                if (svgGroupingSelect) svgGroupingSelect.value = 'layer';
+
+                const colorPerPassCheckbox = document.getElementById('laser-color-per-pass');
+                if (colorPerPassCheckbox) colorPerPassCheckbox.checked = true;
+
+                const heatCheckbox = document.getElementById('laser-heat-management');
+                const heatWarning = document.getElementById('laser-heat-warning');
+                if (heatCheckbox) {
+                    heatCheckbox.checked = true;
+                    if (heatWarning) heatWarning.style.display = '';
+                    heatCheckbox.onchange = (e) => {
+                        if (heatWarning) heatWarning.style.display = e.target.checked ? '' : 'none';
+                    };
+                }
             }
 
-            const dpiInput = document.getElementById('laser-exporter-dpi');
-            if (dpiInput) {
-                dpiInput.value = laserSettings.exportDPI ?? config.laserDefaults?.rasterDPI ?? 1000;
+            // Stencil specific init (only if stencil ops present)
+            if (this.jobHasStencil) {
+                const stencilPaddingInput = document.getElementById('stencil-exporter-padding');
+                if (stencilPaddingInput) {
+                    const laserSettings = this.controller.core?.settings?.laser || {};
+                    stencilPaddingInput.value = laserSettings.exportPadding ?? config.laserDefaults?.exportPadding ?? 5.0;
+                }
             }
 
-            // Initialize laser export UI controls to defaults
-            const cutOrderSelect = document.getElementById('laser-cut-order');
-            if (cutOrderSelect) cutOrderSelect.value = 'normal';
-
-            const svgGroupingSelect = document.getElementById('laser-svg-grouping');
-            if (svgGroupingSelect) svgGroupingSelect.value = 'layer';
-
-            const colorPerPassCheckbox = document.getElementById('laser-color-per-pass');
-            if (colorPerPassCheckbox) colorPerPassCheckbox.checked = true;
-
-            const heatCheckbox = document.getElementById('laser-heat-management');
-            const heatWarning = document.getElementById('laser-heat-warning');
-            if (heatCheckbox) {
-                heatCheckbox.checked = true;
-                if (heatWarning) heatWarning.style.display = '';
-                heatCheckbox.onchange = (e) => {
-                    if (heatWarning) heatWarning.style.display = e.target.checked ? '' : 'none';
-                };
-            }
-
-            // 
             this.attachExporterModalTooltips();
         }
 
@@ -940,8 +960,15 @@
                 item.className = 'file-node-content';
                 item.dataset.operationId = op.id;
 
-                const isLaserRoute = this.controller.isLaserExportForOperation(op.type);
-                const routeBadge = isLaserRoute ? '<span class="exporter-route-badge exporter-route-badge--laser">LASER</span>' : '<span class="exporter-route-badge exporter-route-badge--cnc">CNC</span>';
+                // Three-way route badge
+                let routeBadge;
+                if (op.type === 'stencil') {
+                    routeBadge = '<span class="exporter-route-badge exporter-route-badge--stencil">SVG</span>';
+                } else if (this.controller.isLaserExportForOperation(op.type)) {
+                    routeBadge = '<span class="exporter-route-badge exporter-route-badge--laser">LASER</span>';
+                } else {
+                    routeBadge = '<span class="exporter-route-badge exporter-route-badge--cnc">CNC</span>';
+                }
 
                 item.innerHTML = `
                     <span class="tree-expand-icon">${iconConfig.modalDragHandle}</span>
@@ -966,15 +993,16 @@
         }
 
         updateExportBlocksVisibility() {
-            // Don't change display:none here. Only toggle the .is-disabled class.
             const cncOptions = document.getElementById('exporter-cnc-options');
             const cncPreview = document.getElementById('exporter-cnc-preview');
             const calcBtn = document.getElementById('exporter-calculate-btn');
             const laserOptions = document.getElementById('exporter-laser-options');
+            const stencilOptions = document.getElementById('exporter-stencil-options');
             const list = document.getElementById('exporter-operation-order');
-            
+
             let hasCheckedLaser = false;
             let hasCheckedCNC = false;
+            let hasCheckedStencil = false;
 
             // Check what the user currently has checked
             if (list) {
@@ -983,8 +1011,13 @@
                     if (checkbox && checkbox.checked) {
                         const op = this.selectedOperations.find(o => o.id === item.dataset.operationId);
                         if (op) {
-                            if (this.controller.isLaserExportForOperation(op.type)) hasCheckedLaser = true;
-                            else hasCheckedCNC = true;
+                            if (op.type === 'stencil') {
+                                hasCheckedStencil = true;
+                            } else if (this.controller.isLaserExportForOperation(op.type)) {
+                                hasCheckedLaser = true;
+                            } else {
+                                hasCheckedCNC = true;
+                            }
                         }
                     }
                 });
@@ -993,11 +1026,12 @@
             // MICRO STATE: Disable (gray out) blocks if their corresponding ops are unchecked
             if (cncOptions) cncOptions.classList.toggle('is-disabled', !hasCheckedCNC);
             if (cncPreview) cncPreview.classList.toggle('is-disabled', !hasCheckedCNC);
+            if (laserOptions) laserOptions.classList.toggle('is-disabled', !hasCheckedLaser);
+            if (stencilOptions) stencilOptions.classList.toggle('is-disabled', !hasCheckedStencil);
+
             if (calcBtn) {
                 calcBtn.disabled = !hasCheckedCNC;
             }
-            
-            if (laserOptions) laserOptions.classList.toggle('is-disabled', !hasCheckedLaser);
         }
 
         setupExportHandlers() {
@@ -1013,10 +1047,9 @@
                 calcBtn.onclick = () => this.runToolpathOrchestration(calcBtn);
             }
 
-            // Single-file toggle: switch between combined and per-operation mode
             const singleFileToggle = document.getElementById('exporter-single-file');
             if (singleFileToggle) {
-                singleFileToggle.addEventListener('change', (e) => {
+                singleFileToggle.onchange = (e) => {
                     const selectorDiv = document.getElementById('exporter-operation-selector');
                     if (selectorDiv) {
                         selectorDiv.style.display = e.target.checked ? 'none' : '';
@@ -1024,7 +1057,7 @@
                     this.updateSplitDrillVisibility();
                     this.gcodeResults.clear();
                     this.showPlaceholderPreview();
-                });
+                };
             }
 
             // Preview selector: switch displayed G-code when user picks a different operation
@@ -1054,7 +1087,7 @@
                 });
             }
 
-            // Safeguard: Did they uncheck everything?
+            // Safeguard: Did users uncheck everything?
             if (activeOpIds.length === 0) {
                 this.ui.showStatus('No operations selected for export.', 'warning');
                 return;
@@ -1063,11 +1096,14 @@
             // Separate into pipelines & Get Shared Settings
             const laserOps = [];
             const cncOps = [];
+            const stencilOps = [];
 
             activeOpIds.forEach(id => {
                 const op = this.selectedOperations.find(o => o.id === id);
                 if (op) {
-                    if (this.controller.isLaserExportForOperation(op.type)) {
+                    if (op.type === 'stencil') {
+                        stencilOps.push(op);
+                    } else if (this.controller.isLaserExportForOperation(op.type)) {
                         laserOps.push(op);
                     } else {
                         cncOps.push(op);
@@ -1075,15 +1111,18 @@
                 }
             });
 
-            // Get shared base name, strip any accidental extensions user might type
+            // Get shared settings
             let rawBaseName = document.getElementById('exporter-filename')?.value || 'pcb-output';
-            const baseName = rawBaseName.replace(/\.[^/.]+$/, ""); 
-            const isSingleFile = document.getElementById('exporter-single-file')?.checked !== false;
+            const baseName = rawBaseName.replace(/\.[^/.]+$/, '');
+            const isSingleFile = document.getElementById('exporter-single-file')?.checked === true;
 
             let cncSuccess = false;
             let laserSuccess = false;
+            let stencilSuccess = false;
 
-            // Export CNC (G-CODE)
+            // ════════════════════════════════════════════
+            // CNC EXPORT (G-CODE / RML)
+            // ════════════════════════════════════════════
             if (cncOps.length > 0) {
                 const isRoland = this.controller.core?.settings?.gcode?.postProcessor === 'roland';
                 const cncExt = isRoland ? '.rml' : '.nc';
@@ -1101,8 +1140,6 @@
                 };
 
                 if (isSingleFile) {
-                    // ── SINGLE FILE: download combined result ──
-                    // Auto-calculate if not done
                     let combinedResult = this.gcodeResults.get('__combined__');
                     if (!combinedResult || !combinedResult.gcode) {
                         this.ui.showStatus('Auto-calculating G-Code...', 'info');
@@ -1117,9 +1154,7 @@
                     } else {
                         this.ui.showStatus('G-code generation failed.', 'error');
                     }
-
                 } else {
-                    // ── MULTI-FILE: auto-calculate if needed, then download each ──
                     if (this.gcodeResults.size === 0 || this.gcodeResults.has('__combined__')) {
                         this.ui.showStatus('Calculating individual G-Code files...', 'info');
                         const calcBtn = document.getElementById('exporter-calculate-btn');
@@ -1128,7 +1163,6 @@
 
                     cncSuccess = true;
                     for (const op of cncOps) {
-                        // Check for split drill results (milled and/or peck groups)
                         const splitKeys = Array.from(this.gcodeResults.keys())
                             .filter(k => k.startsWith(`${op.id}_`));
 
@@ -1137,7 +1171,6 @@
                                 const result = this.gcodeResults.get(key);
                                 if (result?.gcode && !result.gcode.startsWith('; Generation Failed')) {
                                     const opCleanName = op.file.name.replace(/\.[^/.]+$/, '');
-                                    // Extract suffix: "op_1_milled" → "milled", "op_1_drill_0.8mm" → "drill-0.8mm"
                                     const suffix = key.substring(op.id.length + 1).replace(/_/g, '-');
                                     downloadBlob(result.gcode, `${baseName}-${suffix}-${opCleanName}${cncExt}`);
                                 } else {
@@ -1163,13 +1196,13 @@
                 const unreadyOps = laserOps.filter(op => !op.offsets || op.offsets.length === 0);
                 if (unreadyOps.length > 0) {
                     const names = unreadyOps.map(o => o.file.name).join(', ');
-                    this.ui.showStatus(`Cannot export: Generate laser paths for ${names} first.`, 'error');
+                    this.ui.showStatus(`Cannot export: Generate paths for ${names} first.`, 'error');
                 } else {
                     const colors = {
-                        isolation: document.getElementById('laser-exporter-color-isolation')?.value || '#ff0000',
-                        drill: document.getElementById('laser-exporter-color-drill')?.value || '#0000ff',
-                        clearing: document.getElementById('laser-exporter-color-clearing')?.value || '#00ff00',
-                        cutout: document.getElementById('laser-exporter-color-cutout')?.value || '#000000'
+                        isolation: document.getElementById('laser-exporter-color-isolation')?.value,
+                        drill: document.getElementById('laser-exporter-color-drill')?.value,
+                        clearing: document.getElementById('laser-exporter-color-clearing')?.value,
+                        cutout: document.getElementById('laser-exporter-color-cutout')?.value
                     };
 
                     // Grab dynamic modal values
@@ -1181,10 +1214,12 @@
                     const exportDPI = dpiInput ? parseInt(dpiInput.value, 10) : 1000;
 
                     // Save choices to core settings for persistence
-                    this.controller.core?.updateSettings('laser', { 
+                    this.controller.core?.updateSettings('laser', {
                         exportPadding: exportPadding,
-                        exportDPI: exportDPI 
+                        exportDPI: exportDPI
                     });
+
+                    const exportFormat = laserSettings.exportFormat || 'svg';
 
                     try {
                         const heatCheckbox = document.getElementById('laser-heat-management');
@@ -1194,12 +1229,12 @@
 
                         const result = await this.controller.orchestrateLaserExport(laserOps, {
                             layerColors: colors,
-                            format: laserSettings.exportFormat || 'svg',
+                            format: exportFormat,
                             dpi: exportDPI,
                             padding: exportPadding,
                             singleFile: isSingleFile,
                             baseName: baseName,
-                            heatManagement: (heatCheckbox?.checked && laserSettings.exportFormat !== 'png') ? 'standard' : 'off',
+                            heatManagement: (heatCheckbox?.checked && exportFormat !== 'png') ? 'standard' : 'off',
                             reverseCutOrder: cutOrderSelect ? cutOrderSelect.value === 'reverse' : false,
                             svgGrouping: svgGroupingSelect ? svgGroupingSelect.value : 'layer',
                             colorPerPass: colorPerPassCheckbox?.checked || false
@@ -1217,14 +1252,50 @@
                 }
             }
 
-            // Wrap up
-            if (cncSuccess || laserSuccess) {
+            // Stencil export (always SVG, hardcoded settings)
+            if (stencilOps.length > 0) {
+                const unreadyOps = stencilOps.filter(op => !op.offsets || op.offsets.length === 0);
+                if (unreadyOps.length > 0) {
+                    const names = unreadyOps.map(o => o.file.name).join(', ');
+                    this.ui.showStatus(`Cannot export: Generate stencil geometry for ${names} first.`, 'error');
+                } else {
+                    const stencilPaddingInput = document.getElementById('stencil-exporter-padding');
+                    const exportPadding = stencilPaddingInput ? parseFloat(stencilPaddingInput.value) : 5.0;
+
+                    try {
+                        // Stencils reuse the LaserImageExporter backend with strict, hardcoded settings. No user-facing complexity needed.
+                        const result = await this.controller.orchestrateLaserExport(stencilOps, {
+                            layerColors: { stencil: '#000000' },
+                            format: 'svg',
+                            padding: exportPadding,
+                            singleFile: isSingleFile,
+                            baseName: baseName + '-stencil',
+                            heatManagement: 'off',
+                            reverseCutOrder: false,
+                            svgGrouping: 'layer',
+                            colorPerPass: false
+                        });
+
+                        if (result.success) {
+                            stencilSuccess = true;
+                        } else {
+                            this.ui.showStatus('Stencil export produced no output — check that geometry is generated.', 'error');
+                        }
+                    } catch (error) {
+                        console.error('[ModalManager] Stencil export failed:', error);
+                        this.ui.showStatus('Stencil export failed: ' + error.message, 'error');
+                    }
+                }
+            }
+
+            if (cncSuccess || laserSuccess || stencilSuccess) {
                 const parts = [];
                 if (cncSuccess) parts.push('G-code');
                 if (laserSuccess) parts.push('Laser');
+                if (stencilSuccess) parts.push('Stencil');
                 this.ui.showStatus(`${parts.join(' + ')} export completed successfully`, 'success');
                 this.closeModal();
-            } else if (cncOps.length === 0 && laserOps.length === 0) {
+            } else if (cncOps.length === 0 && laserOps.length === 0 && stencilOps.length === 0) {
                 this.ui.showStatus('No operations to export.', 'warning');
             }
         }
@@ -1286,6 +1357,7 @@
             attachTo('laser-exporter-color-isolation', 'tooltips.modals.exporter.layerColors');
             attachTo('laser-exporter-padding', 'tooltips.machineSettings.laserExportPadding');
             attachTo('laser-exporter-dpi', 'tooltips.machineSettings.laserExportDPI');
+            attachTo('stencil-exporter-padding', 'tooltips.machineSettings.stencilExportPadding');
 
             // Attach to calculate button
             const calcBtn = document.getElementById('exporter-calculate-btn');
@@ -1481,8 +1553,8 @@
                     list.querySelectorAll('.file-node-content').forEach(item => {
                         const checkbox = item.querySelector('input[type="checkbox"]');
                         const op = this.selectedOperations.find(o => o.id === item.dataset.operationId);
-                        // Only calculate G-code for CNC ops
-                        if (checkbox?.checked && !this.controller.isLaserExportForOperation(op.type)) {
+                        // Only calculate G-code for CNC ops (exclude both laser and stencil)
+                    if (checkbox?.checked && !this.controller.isLaserExportForOperation(op.type) && op.type !== 'stencil') {
                             selectedItemIds.push(item.dataset.operationId);
                         }
                     });
@@ -1521,7 +1593,7 @@
                     optimize: optimizeCheckbox ? optimizeCheckbox.checked : true
                 };
 
-                const isSingleFile = document.getElementById('exporter-single-file')?.checked !== false;
+                const isSingleFile = document.getElementById('exporter-single-file')?.checked === true;
 
                 if (isSingleFile) {
                     // ── COMBINED: one orchestration call, one result ──

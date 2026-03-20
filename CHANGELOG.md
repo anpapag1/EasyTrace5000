@@ -4,19 +4,25 @@ All notable changes to the **EasyTrace5000** project will be documented in this 
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## [1.1.2] - 2026-XX-XX
+## [1.1.2] - 2026-03-20
 
 ### Fixed
 - **Offset Laser SVG Reordering:** The old "optimized" grouping was causing localized heat build-up and scorching. Each pass should finish before the next and starting from the smallest geometry.
 - **Allow Drill Milling Of Undersized Tool With Plunge Entry:** The hole diameter minus tool size vs tolerance logic was only meant for helixes to avoid too deep and tight awkward helix commands.
+- **Single File Export Toggle:** Implementation wasn't consistent with other modal toggles and could cause detection problems in stricter browsers.
+- **Operational Parameter Checkbox Tooltips:** They weren't getting properly attached and the are now.
 
 ### Added
+- **Soldermask Stencil Operation** New operation that can read regular gerbers and soldermask layers, options to ignore regions, flashes with holes and include extra registration holes.
+- **Soldermask Stencil Example** SMD example now includes the .gbr file representing the soldermask stencil layer to be used to test the new Stencil Operation workflow.
 - **Offset Laser SVG Order Flip Toggle** This toggle can flip the order in which geometry is put into the svg in case a software starts processing from the wrong side.
 - **Offset Laser SVG Unique Colors Per Layer Toggle** This toggle can enforce individual colors per layer for softwares that process groups from it.
 
 ### Changed
 - **Hid Number Of Passes/Offset In Drill Operations:** It's now automatically calculated to clear all the geometry and avoid risky central cores that can break end-mills once they get loose.
 - **Hardcoded Drill Mill Stepover:** Since it's hidden from users now, it loads a more conservative 40% from config.js.
+- **Single File Export Default:** Export Manager Modal now has single file export turned off by default, for safety.
+- **New User Hint Animation** Instead of holding static with 1 source geometry node highlight will now pulse every few seconds.
 
 ## [1.1.1] - 2026-03-17
 

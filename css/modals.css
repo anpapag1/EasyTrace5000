@@ -950,7 +950,6 @@
     background: var(--color-bg-primary);
     border-radius: var(--radius);
     padding: var(--spacing-sm);
-    max-height: 12rem;
     overflow-y: auto;
     flex-shrink: 0;
 }
@@ -987,6 +986,10 @@
 
 .exporter-route-badge--cnc {
     color: #4ecdc4;
+}
+
+.exporter-route-badge--stencil {
+    color: #860694;
 }
 
 .exporter-op-item {

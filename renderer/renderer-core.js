@@ -692,6 +692,7 @@
                     drill: read('--color-geometry-source-drill'),
                     clearing: read('--color-geometry-source-clearing'),
                     cutout: read('--color-geometry-source-cutout'),
+                    stencil: read('--color-geometry-source-stencil'),
                     fused: read('--color-geometry-source-isolation')
                 },
                 operations: {
@@ -699,6 +700,7 @@
                     drill: read('--color-operation-drill'),
                     clearing: read('--color-operation-clearing'),
                     cutout: read('--color-operation-cutout'),
+                    stencil: read('--color-operation-stencil')
                 },
                 canvas: {
                     background: read('--color-canvas-background'),
@@ -754,8 +756,13 @@
                 case 'clearing':  return src.clearing;
                 case 'drill':     return src.drill;
                 case 'cutout':    return src.cutout;
+                case 'stencil':   return src.stencil;
                 case 'fused':     return src.fused;
                 case 'offset':
+                    // Stencil offsets use the stencil color, not the generic offset palette
+                    if (layer.operationType === 'stencil') {
+                        return src.stencil;
+                    }
                     switch (layer.offsetType) { 
                         case 'external': return geo.offset.external;
                         case 'internal': return geo.offset.internal;

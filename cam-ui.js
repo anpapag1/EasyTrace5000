@@ -298,11 +298,13 @@
 
         addNonFusableLayers() {
             this.core.operations.forEach(operation => {
-                if (operation.type === 'drill' || operation.type === 'cutout') {
+                if (operation.type === 'drill' || operation.type === 'cutout' || operation.type === 'stencil') {
                     if (operation.primitives && operation.primitives.length > 0) {
+                        const hasOffsets = operation.type === 'stencil' && operation.offsets && operation.offsets.length > 0;
+
                         this.renderer.addLayer('source_' + operation.id, operation.primitives, {
                             type: operation.type,
-                            visible: true,
+                            visible: !hasOffsets, // Simplified boolean flip
                             color: operation.color || (opsConfig[operation.type] && opsConfig[operation.type].color)
                         });
                     }
@@ -313,9 +315,12 @@
         addIndividualLayers() {
             this.core.operations.forEach(operation => {
                 if (operation.primitives && operation.primitives.length > 0) {
+                    // Apply the same logic here so it works when Fusion Mode is OFF
+                    const hasOffsets = operation.type === 'stencil' && operation.offsets && operation.offsets.length > 0;
+
                     this.renderer.addLayer('source_' + operation.id, operation.primitives, {
                         type: operation.type,
-                        visible: true,
+                        visible: !hasOffsets,
                         color: operation.color || (opsConfig[operation.type] && opsConfig[operation.type].color)
                     });
                 }
@@ -325,8 +330,8 @@
         addOffsetLayers() {
             this.core.operations.forEach(operation => {
                 if (operation.offsets && operation.offsets.length > 0) {
-                    const isCombined = operation.offsets[0]?.combined;
                     const isLaser = window.pcbcam?.isLaserPipeline?.() || false;
+                    const isCombined = operation.offsets[0]?.metadata?.offset?.combined || isLaser;
                     const hasPreview = !isLaser && operation.preview && operation.preview.primitives && operation.preview.primitives.length > 0;
 
                     if (isCombined) {
@@ -470,6 +475,14 @@
                             }
                         }
 
+                        // Refresh panel to update any disabled state
+                        if (this.operationPanel && this.operationPanel.currentOperation) {
+                            this.operationPanel.showOperationProperties(
+                                this.operationPanel.currentOperation,
+                                this.operationPanel.currentGeometryStage
+                            );
+                        }
+
                         await this.updateRendererAsync();
                     } else {
                         this.updateStatus('Error processing ' + file.name + ': ' + operation.error, 'error');
@@ -506,6 +519,17 @@
             if (this.core.removeOperation(operationId)) {
                 if (this.navTreePanel) {
                     this.navTreePanel.removeFileNode(operationId);
+                }
+
+                // Refresh the property panel to catch cross-operation constraints
+                if (this.operationPanel && this.operationPanel.currentOperation) {
+                    // Only refresh if the deleted operation wasn't the one we are looking at
+                    if (this.operationPanel.currentOperation.id !== operationId) {
+                        this.operationPanel.showOperationProperties(
+                            this.operationPanel.currentOperation,
+                            this.operationPanel.currentGeometryStage
+                        );
+                    }
                 }
 
                 this.updateRendererAsync();
@@ -545,12 +569,10 @@
                 if (operation.offsets) {
                     operation.offsets = []; // Clear all offsets
                 }
-
             } else if (geoData.type.startsWith('offset_')) {
                 const passIndex = parseInt(geoData.type.split('_')[1]); // e.g., "offset_0" -> 0
                 const passNumber = passIndex + 1;
                 layerName = `offset_${operation.id}_pass_${passNumber}`;
-
                 if (operation.offsets) {
                     operation.offsets.splice(passIndex, 1);
                 }
@@ -559,6 +581,53 @@
 
                 if (geoData.type === 'preview' && operation.preview) {
                     operation.preview = null;
+
+                    // Auto-unhide offsets when CNC preview is deleted
+                    if (operation.offsets && operation.offsets.length > 0) {
+                        const isLaser = window.pcbcam?.isLaserPipeline?.() || false;
+                        const isCombined = operation.offsets[0]?.metadata?.offset?.combined || isLaser;
+                        
+                        // Unhide the specific offset layer(s) in the Renderer
+                        if (isCombined) {
+                            const offsetLayerName = `offset_${operation.id}_combined`;
+                            if (this.renderer.layers.has(offsetLayerName)) {
+                                this.renderer.layers.get(offsetLayerName).visible = true;
+                            }
+                        } else {
+                            operation.offsets.forEach((_, passIndex) => {
+                                const offsetLayerName = `offset_${operation.id}_pass_${passIndex + 1}`;
+                                if (this.renderer.layers.has(offsetLayerName)) {
+                                    this.renderer.layers.get(offsetLayerName).visible = true;
+                                }
+                            });
+                        }
+
+                        // Unhide the eye icons in the Nav Tree UI
+                        if (this.navTreePanel) {
+                            const fileNode = this.navTreePanel.nodes.get(fileId);
+                            if (fileNode) {
+                                fileNode.geometries.forEach((geo) => {
+                                    if (geo.type.startsWith('offset')) {
+                                        const visBtn = geo.element.querySelector('.visibility-btn');
+                                        if (visBtn) visBtn.classList.remove('is-hidden');
+                                    }
+                                });
+                            }
+                        }
+                    }
+                }
+            }
+
+            // Restore stencil source visibility if all offsets are deleted
+            if (operation.type === 'stencil' && (!operation.offsets || operation.offsets.length === 0)) {
+                const sourceLayerName = `source_${operation.id}`;
+                if (this.renderer.layers.has(sourceLayerName)) {
+                    this.renderer.layers.get(sourceLayerName).visible = true;
+                }
+                if (this.navTreePanel) {
+                    const fileNode = this.navTreePanel.nodes.get(fileId);
+                    const visBtn = fileNode?.element.querySelector('.file-node-content .visibility-btn');
+                    if (visBtn) visBtn.classList.remove('is-hidden');
                 }
             }
 
@@ -574,7 +643,7 @@
                 this.navTreePanel.removeGeometryNode(fileId, geometryId);
 
                 // Re-select the parent file node
-                this.navTreePanel.selectFile(fileId, fileData.operation);
+                this.navTreePanel.selectHighestStage(fileId);
             }
 
             // Re-draw the canvas

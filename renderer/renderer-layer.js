@@ -163,12 +163,45 @@
         _renderVisibleLayers() {
             const orderedLayers = this._getOrderedLayers();
 
+            // Per-type copper source layer counts for multi-file transparency
+            const copperSourceCounts = { isolation: 0, clearing: 0 };
+            for (const layer of orderedLayers) {
+                if (!layer.visible) continue;
+                const isSource = !layer.isOffset && !layer.isPreview && layer.type !== 'offset' && layer.type !== 'preview' && layer.type !== 'fused';
+                if (isSource && copperSourceCounts.hasOwnProperty(layer.type)) {
+                    copperSourceCounts[layer.type]++;
+                }
+            }
+
             for (const layer of orderedLayers) {
                 if (!layer.visible) continue;
 
-                // Dispatch to appropriate renderer based on layer type and flags
+                const isStencil = layer.type === 'stencil' || layer.operationType === 'stencil';
+                const isStencilSource = isStencil && !layer.isOffset && !layer.isPreview && layer.type !== 'offset' && layer.type !== 'preview';
+                const isStencilGenerated = isStencil && !isStencilSource;
+
+                // Determine layer transparency
+                let layerAlpha = 1.0;
+                if (isStencilSource) {
+                    layerAlpha = 0.25;
+                } else if (isStencilGenerated) {
+                    layerAlpha = 0.35;
+                } else if (copperSourceCounts[layer.type] > 1) {
+                    layerAlpha = 0.70;
+                }
+
+                if (layerAlpha < 1.0) {
+                    this.ctx.save();
+                    this.ctx.globalAlpha = layerAlpha;
+                }
+
+                // Dispatch to renderer
                 if (layer.isHatch) {
                     this._renderHatchLayerBatched(layer);
+                } else if (isStencilSource) {
+                    this._renderStencilSourceImmediate(layer);
+                } else if (isStencilGenerated) {
+                    this._renderStencilGeneratedImmediate(layer);
                 } else if (layer.metadata?.strategy === 'filled') {
                     this._renderFilledLayerImmediate(layer);
                 } else if (layer.isOffset || layer.type === 'offset') {
@@ -177,6 +210,10 @@
                     this._renderPreviewLayerImmediate(layer);
                 } else {
                     this._renderSourceLayerImmediate(layer);
+                }
+
+                if (layerAlpha < 1.0) {
+                    this.ctx.restore();
                 }
             }
         }
@@ -188,13 +225,20 @@
                 drill: [],
                 fused: [],
                 laserFill: [],
-                offset: [], 
+                offset: [],
+                stencil: [],
                 preview: [] 
             };
 
             this.layers.forEach((layer) => {
                 if (!layer.visible) return;
                 const strategy = layer.metadata?.strategy;
+
+                // Route all stencil geometry (source + offset) into a dedicated top-layer bucket
+                if (layer.type === 'stencil' || layer.operationType === 'stencil') {
+                    buckets.stencil.push(layer);
+                    return;
+                }
 
                 switch (layer.type) {
                     case 'cutout':  buckets.cutout.push(layer); break;
@@ -228,6 +272,7 @@
                 ...buckets.fused,
                 ...buckets.laserFill,
                 ...buckets.offset,
+                ...buckets.stencil,
                 ...buckets.preview
             ];
         }
@@ -317,6 +362,115 @@
             for (const prim of peckMarks) {
                 this.primitiveRenderer.renderPeckMark(prim, { layer });
                 this.core.renderStats.drawCalls++;
+            }
+        }
+
+        // ========================================================================
+        // STENCIL SOURCE: Ghost fill overlay (no strokes)
+        // ========================================================================
+
+        _renderStencilSourceImmediate(layer) {
+            const viewBounds = this.core.frameCache.viewBounds;
+            const isRotated = this.core.currentRotation !== 0;
+
+            const displayBounds = isRotated ? this._getRotatedLayerBounds(layer) : layer.bounds;
+            if (displayBounds && !this.core.boundsIntersect(displayBounds, viewBounds)) {
+                this.core.renderStats.primitives += layer.primitives.length;
+                this.core.renderStats.skippedPrimitives += layer.primitives.length;
+                return;
+            }
+
+            const stencilColor = this.core.getLayerColorSettings(layer);
+            this.ctx.fillStyle = stencilColor;
+
+            const entries = layer.renderCache?.entries || 
+                layer.primitives.map(p => ({ primitive: p, bounds: p.getBounds(), screenSize: 1 }));
+
+            for (const entry of entries) {
+                this.core.renderStats.primitives++;
+
+                if (!this.core.boundsIntersect(entry.bounds, viewBounds)) {
+                    this.core.renderStats.skippedPrimitives++;
+                    this.core.renderStats.culledViewport++;
+                    continue;
+                }
+
+                if (!this.core.passesLODCull(entry.screenSize, this.core.viewScale, this.core.lodThreshold)) {
+                    this.core.renderStats.skippedPrimitives++;
+                    this.core.renderStats.culledLOD++;
+                    continue;
+                }
+
+                this.core.renderStats.renderedPrimitives++;
+
+                if (this._shouldCollectDebug(entry.primitive)) {
+                    this.debugPrimitives.push(entry.primitive);
+                }
+
+                // Fill only — pure ghost overlay, no outlines
+                this.primitiveRenderer._drawPrimitivePath(entry.primitive);
+                this.ctx.fill('evenodd');
+
+                this.core.renderStats.drawCalls++;
+            }
+        }
+
+        // ========================================================================
+        // STENCIL GENERATED: Fill + stroke outlines (aperture cutouts)
+        // ========================================================================
+
+        _renderStencilGeneratedImmediate(layer) {
+            const viewBounds = this.core.frameCache.viewBounds;
+            const isRotated = this.core.currentRotation !== 0;
+
+            const displayBounds = isRotated ? this._getRotatedLayerBounds(layer) : layer.bounds;
+            if (displayBounds && !this.core.boundsIntersect(displayBounds, viewBounds)) {
+                this.core.renderStats.primitives += layer.primitives.length;
+                this.core.renderStats.skippedPrimitives += layer.primitives.length;
+                return;
+            }
+
+            const stencilColor = this.core.getLayerColorSettings(layer);
+            const fc = this.core.frameCache;
+            const strokeWidth = Math.max(2.0 * fc.invScale, fc.minWorldWidth);
+
+            this.ctx.fillStyle = stencilColor;
+            this.ctx.strokeStyle = stencilColor;
+            this.ctx.lineWidth = strokeWidth;
+            this.ctx.lineCap = 'round';
+            this.ctx.lineJoin = 'round';
+            this.ctx.setLineDash([]);
+
+            const entries = layer.renderCache?.entries ||
+                layer.primitives.map(p => ({ primitive: p, bounds: p.getBounds(), screenSize: 1 }));
+
+            for (const entry of entries) {
+                this.core.renderStats.primitives++;
+
+                if (!this.core.boundsIntersect(entry.bounds, viewBounds)) {
+                    this.core.renderStats.skippedPrimitives++;
+                    this.core.renderStats.culledViewport++;
+                    continue;
+                }
+
+                if (!this.core.passesLODCull(entry.screenSize, this.core.viewScale, this.core.lodThreshold)) {
+                    this.core.renderStats.skippedPrimitives++;
+                    this.core.renderStats.culledLOD++;
+                    continue;
+                }
+
+                this.core.renderStats.renderedPrimitives++;
+
+                if (this._shouldCollectDebug(entry.primitive)) {
+                    this.debugPrimitives.push(entry.primitive);
+                }
+
+                // Fill + stroke: shows aperture area with crisp boundary
+                this.primitiveRenderer._drawPrimitivePath(entry.primitive);
+                this.ctx.fill('evenodd');
+                this.ctx.stroke();
+
+                this.core.renderStats.drawCalls += 2;
             }
         }
 

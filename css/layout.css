@@ -463,6 +463,7 @@
     cursor: pointer;
     border-radius: var(--radius);
     min-height: var(--touch-target-compact);
+    transition: box-shadow 0.25s ease-in-out, background 0.2s ease-in-out;
 }
 
 .file-node-content:hover {
@@ -909,8 +910,7 @@
    ============================================================================ */
 
 .file-node-content.onboarding-highlight {
-    border: 2px solid var(--color-accent-primary);
-    padding: calc(var(--spacing-sm) - 2px);
+    box-shadow: inset 0 0 0 2px var(--color-accent-primary);
 }
 
 /* ============================================================================
