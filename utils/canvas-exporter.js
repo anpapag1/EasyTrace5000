@@ -888,7 +888,7 @@ Mode: ${vo.showWireframe ? 'Wireframe' : 'Solid'} | Geometry: ${vo.fuseGeometry 
             document.body.appendChild(link);
             link.click();
             document.body.removeChild(link);
-            setTimeout(() => URL.revokeObjectURL(url), 100);
+            setTimeout(() => URL.revokeObjectURL(url), 5000);
         }
 
         debug(message) {

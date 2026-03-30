@@ -342,7 +342,9 @@ svg[fill="currentColor"] {
    Random Fixes
    ============================================================================ */
 
-.checkbox-label span:not(.tooltip-trigger),
-.radio-label span:not(.tooltip-trigger) {
-    pointer-events: none; /* Fixes Safari checkbox toggle bug */
+/* WebKit (Safari, DuckDuckGo on Apple) fails to forward clicks from child elements to a wrapped checkbox inside a flex-displayed label.
+   Making non-interactive children click-transparent forces clicks to register on the <label> itself, which reliably toggles the input. */
+.checkbox-label > *:not(input):not(button):not(.tooltip-trigger),
+.radio-label > *:not(input):not(button):not(.tooltip-trigger) {
+    pointer-events: none;
 }

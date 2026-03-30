@@ -954,6 +954,31 @@
     flex-shrink: 0;
 }
 
+/* Drag handles: hidden by default, shown only when ordering matters (single-file mode) */
+.operation-order .drag-handle {
+    visibility: hidden;
+    width: 1rem;
+}
+
+.operation-order.is-orderable .drag-handle {
+    visibility: visible;
+    cursor: grab;
+}
+
+/* Locked items never show drag handle regardless of orderable state */
+.operation-order .file-node-content[data-locked="true"] .drag-handle {
+    visibility: hidden;
+    cursor: default;
+}
+
+.operation-order:not(.is-orderable) .file-node-content {
+    cursor: default;
+}
+
+.operation-order:not(.is-orderable) .file-node-content[draggable] {
+    -webkit-user-drag: none;
+}
+
 .help-text {
     font-size: var(--font-size-xs);
     color: var(--color-text-hint);
@@ -1011,6 +1036,12 @@
 }
 
 .exporter-op-item input[type="checkbox"] {
+    margin-right: var(--spacing-sm);
+}
+
+/* Spacing for operation list checkboxes and labels */
+.operation-order .file-node-content .exporter-op-checkbox {
+    margin-left: var(--spacing-xs);
     margin-right: var(--spacing-sm);
 }
 

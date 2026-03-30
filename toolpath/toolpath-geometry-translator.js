@@ -602,20 +602,19 @@
             const minArcChordLength = 0.01;
             const chordDistance = Math.hypot(end.x - start.x, end.y - start.y);
 
-            if (chordDistance < minArcChordLength) {
+            // Calculate actual sweep to protect full circles
+            let sweep = primitive.endAngle - primitive.startAngle;
+            if (isClockwise && sweep > 0) sweep -= 2 * Math.PI;
+            if (!isClockwise && sweep < 0) sweep += 2 * Math.PI;
+
+            // Only skip if the chord AND the sweep are both tiny
+            if (chordDistance < minArcChordLength && Math.abs(sweep) < Math.PI) {
                 plan.addLinear(end.x, end.y, depth, feedRate);
                 return;
             }
-
+            
             // Add Arc Command
-            plan.addArc(
-                end.x,
-                end.y,
-                depth,
-                i, j,
-                isClockwise,
-                feedRate
-            );
+            plan.addArc(end.x, end.y, depth, i, j, isClockwise, feedRate);
         }
 
         translatePath(plan, contour, depth, feedRate) {
@@ -665,6 +664,36 @@
                 }
             }
 
+            // Reconstructed full circle: single arc spanning 360° // REVIEW - it feels like a band-aid for a problem before toolpath planning.
+            if (arcSegments.length === 1 && points.length <= 3) {
+                const arc = arcSegments[0];
+                if (arc.center && arc.radius > 0) {
+                    let sweep = arc.sweepAngle;
+                    if (sweep === undefined) {
+                        sweep = arc.endAngle - arc.startAngle;
+                        if (arc.clockwise && sweep > 0) sweep -= 2 * Math.PI;
+                        if (!arc.clockwise && sweep < 0) sweep += 2 * Math.PI;
+                    }
+                    const transformedCenter = this.applyTransforms(arc.center, transforms);
+                    // Canonical 3 o'clock entry — matches circleToPath / translateCircle
+                    const rawEntry = { x: arc.center.x + arc.radius, y: arc.center.y };
+                    const canonicalEntry = this.applyTransforms(rawEntry, transforms);
+                    const i_val = transformedCenter.x - canonicalEntry.x;
+                    const j_val = transformedCenter.y - canonicalEntry.y;
+
+                    plan.addArc(canonicalEntry.x, canonicalEntry.y, depth, i_val, j_val, true, feedRate);
+
+                    // Update metadata so optimizer sees consistent entry/exit and can cluster this with other passes of the same hole
+                    plan.metadata.entryPoint = { x: canonicalEntry.x, y: canonicalEntry.y, z: depth };
+                    plan.metadata.exitPoint = { ...plan.metadata.entryPoint };
+                    plan.metadata.isSimpleCircle = true;
+                    plan.metadata.isClosedLoop = true;
+                    plan.metadata.center = { x: transformedCenter.x, y: transformedCenter.y };
+                    plan.metadata.radius = arc.radius;
+                    return;
+                }
+            }
+
             // Standard segment-by-segment processing
             const isPhysicallyClosed = this._isClosedPoints(points);
             const numPoints = points.length;
@@ -686,7 +715,15 @@
                     // Arc segment
                     const chordDistance = Math.hypot(endPoint.x - startPoint.x, endPoint.y - startPoint.y);
 
-                    if (chordDistance >= minArcChordLength && arc.center && arc.radius > 0) {
+                    let sweep = arc.sweepAngle;
+                    if (sweep === undefined) {
+                        sweep = arc.endAngle - arc.startAngle;
+                        if (arc.clockwise && sweep > 0) sweep -= 2 * Math.PI;
+                        if (!arc.clockwise && sweep < 0) sweep += 2 * Math.PI;
+                    }
+
+                    // Allow arcs with a tiny chord IF their sweep angle is massive (e.g., a full circle)
+                    if ((chordDistance >= minArcChordLength || Math.abs(sweep) >= Math.PI) && arc.center && arc.radius > 0) {
                         const transformedCenter = this.applyTransforms(arc.center, transforms);
                         const i_val = transformedCenter.x - startPoint.x;
                         const j_val = transformedCenter.y - startPoint.y;

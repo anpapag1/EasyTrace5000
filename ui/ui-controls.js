@@ -867,6 +867,16 @@
             const startCodeTA = document.getElementById('start-code-ta');
             const endCodeTA = document.getElementById('end-code-ta');
 
+            // REVIEW - All default Roland Profile logic
+            const updateRolandSettings = (newSettings) => {
+                const currentRoland = this.ui.core.settings.processorSettings?.roland || {};
+                this.ui.core.updateSettings('processorSettings', {
+                    roland: { ...currentRoland, ...newSettings }
+                });
+            };
+            const initialRolandModel = rolandSettings.rolandModel || 'mdx50';
+            const initialProfile = ROLAND_PROFILES[initialRolandModel] || ROLAND_PROFILES['custom'];
+
             if (postProcessorSelect) {
                 postProcessorSelect.innerHTML = '';
                 const generator = window.pcbcam?.gcodeGenerator;
@@ -1051,32 +1061,31 @@
             }
 
             if (rolandStepsInput) {
-                rolandStepsInput.value = rolandSettings.rolandStepsPerMM;
+                rolandStepsInput.value = rolandSettings.rolandStepsPerMM || initialProfile.stepsPerMM;
                 rolandStepsInput.addEventListener('change', (e) => {
                     updateRolandSettings({ rolandStepsPerMM: parseInt(e.target.value) || 100 });
                 });
             }
 
             if (rolandMaxFeedInput) {
-                rolandMaxFeedInput.value = rolandSettings.rolandMaxFeed;
+                rolandMaxFeedInput.value = rolandSettings.rolandMaxFeed || initialProfile.maxFeedXY;
                 rolandMaxFeedInput.addEventListener('change', (e) => {
                     updateRolandSettings({ rolandMaxFeed: parseFloat(e.target.value) || 60 });
                 });
             }
 
             if (rolandZModeSelect) {
-                rolandZModeSelect.value = rolandSettings.rolandZMode;
+                rolandZModeSelect.value = rolandSettings.rolandZMode || initialProfile.zMode;
                 rolandZModeSelect.addEventListener('change', (e) => {
                     updateRolandSettings({ rolandZMode: e.target.value });
                 });
             }
 
             if (rolandSpindleModeSelect) {
-                rolandSpindleModeSelect.value = rolandSettings.rolandSpindleMode;
+                rolandSpindleModeSelect.value = rolandSettings.rolandSpindleMode || initialProfile.spindleMode;
                 rolandSpindleModeSelect.addEventListener('change', (e) => {
                     const mode = e.target.value;
                     updateRolandSettings({ rolandSpindleMode: mode });
-                    this.updateRolandSpindleVisibility(mode);
                 });
             }
 
@@ -1184,7 +1193,7 @@
             // Apply initial visibility states
             this.updateProcessorFieldVisibility(loadedSettings.gcode.postProcessor);
             this.updatePipelineFieldVisibility();
-            this.updateRolandSpindleVisibility(loadedSettings.machine.rolandSpindleMode || 'direct');
+            this.updateRolandProfileFields(initialProfile);
 
             // Reconfigure laser button
             const reconfigBtn = document.getElementById('reconfigure-laser-btn');
@@ -1254,23 +1263,6 @@
         }
 
         /**
-         * Toggles spindle RPM input visibility based on spindle mode.
-         */
-        updateRolandSpindleVisibility(spindleMode) {
-            const rpmField = document.getElementById('roland-spindle-rpm-field');
-            if (!rpmField) return;
-
-            switch (spindleMode) {
-                case 'direct':
-                    rpmField.style.display = '';
-                    break;
-                case 'manual':
-                    rpmField.style.display = 'none';
-                    break;
-            }
-        }
-
-        /**
          * Updates Roland-specific field visibility and editability based on machine profile.
          */
         updateRolandProfileFields(profile) {
@@ -1307,8 +1299,6 @@
             if (rpmField) {
                 if (!profile.supportsRC) {
                     rpmField.style.display = 'none';
-                } else {
-                    this.updateRolandSpindleVisibility(profile.spindleMode);
                 }
             }
 

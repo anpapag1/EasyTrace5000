@@ -4,17 +4,24 @@ All notable changes to the **EasyTrace5000** project will be documented in this 
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## [1.1.3] - 2026-XX-XX
+## [1.1.3] - 2026-03-30
 
 ### Added
 - **SVG Drill Operation Logic:** Hole and slot shaped geometries can now be used to trigger Drill op macros. Round and obround shapes can be converted, others are ignored with a warning.
-- **Open Cutout Polygon:** If a cutout path isn't closed and can't be closed just by stitching it together, a new screen let's the user try to close it with higher tolerances.
+- **Multiple Individual Boards:** Cutout operations can now handle files with more than 1 polygon, including nested hole/islands (even from flat gerbers).
+- **Open Cutout Polygon:** If a cutout path isn't closed and can't be closed just by the main stitching algorithm, a new screen let's the user try to close it with higher tolerances.
 - **Warning Modal:** Can query the user about geometry choices (currently) that need to be made instead of automatically assuming anything.
 - **Source Geometry Stats:** Can help understand changes requested by automatic checks in certain operations (like converting circles and obrounds in svg's).
 
 ### Fixed
 - **Rotation + Viewport Culling:** Geometry will stop disappearing near the edges of the canvas viewport when rotation is applied. It was only taking mirroring into account.
-- **ZoomToFit Improvements:** Now also accounts for rotation and also ignores the rulers dimensions when placing the board. 
+- **ZoomToFit Improvements:** Now also accounts for rotation and also ignores the rulers dimensions when placing the board.
+- **Webkit Export Safeguard:** Added a time delay between files to try and avoid triggering what should be "download spam" protections in Safari when exporting multiple files in very close succession.
+- **Promote All Full Circles To Primitives:** An edge case could cause some reconstructed full arcs to be assumed as paths instead of circles. (Needs a thorough review.)
+
+### Changed
+- **Operation Export Order:** Reordered operations in the internal export logic. UI flow can also lock reordering when it's irrelevant, like for Laser pipeline.
+- **Post-Processor Extensions:** The file name text-box in the Export Modal will show the correct file type connected to the selected post-processor.
 
 ## [1.1.2] - 2026-03-20
 

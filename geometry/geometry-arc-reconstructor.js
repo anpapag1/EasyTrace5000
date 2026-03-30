@@ -639,7 +639,9 @@
 
             const p0 = points[0];
             const pN = points[points.length - 1];
-            const chordLen = Math.hypot(pN.x - p0.x, pN.y - p0.y);
+            const dx = pN.x - p0.x;
+            const dy = pN.y - p0.y;
+            const chordLen = Math.sqrt(dx * dx + dy * dy);
 
             if (chordLen < minChordLen) {
                 this.debug(`Arc Rejected: Chord too short (${chordLen.toFixed(4)} < ${minChordLen})`, { curveId: arcParams.curveId });

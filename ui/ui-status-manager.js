@@ -77,6 +77,10 @@
 
             // Add initial hint message to the log
             this.addLogEntry(textConfig.logHintViz, 'info');
+
+            this.statusTextEl = document.getElementById('status-text');
+            this.progressBarEl = document.getElementById('progress-bar');
+            this.progressContainerEl = document.getElementById('status-progress');
         }
 
         setDebugVisibility(isVisible) {
@@ -166,14 +170,13 @@
         }
 
         updateStatus(message = null, type = 'normal') {
-            const statusText = document.getElementById('status-text');
-            if (!statusText) return;
+            if (!this.statusTextEl) return;
 
             // Set appropriate aria-live based on message type
             if (type === 'error') {
-                statusText.setAttribute('aria-live', 'assertive');
+                this.statusTextEl.setAttribute('aria-live', 'assertive');
             } else {
-                statusText.setAttribute('aria-live', 'polite');
+                this.statusTextEl.setAttribute('aria-live', 'polite');
             }
 
             if (this.statusTimeout) {
@@ -182,8 +185,8 @@
             }
 
             if (message) {
-                statusText.textContent = message;
-                statusText.className = `status-text ${type}`;
+                this.statusTextEl.textContent = message;
+                this.statusTextEl.className = `status-text ${type}`;
                 this.currentStatus = { message, type };
 
                 this.addLogEntry(message, type);
@@ -211,8 +214,8 @@
                     defaultMessage = this.lang.get('status.default', textConfig.statusDefault);
                 }
 
-                statusText.textContent = defaultMessage;
-                statusText.className = 'status-text';
+                this.statusTextEl.textContent = defaultMessage;
+                this.statusTextEl.className = 'status-text';
                 this.currentStatus = null;
             }
         }
@@ -226,12 +229,9 @@
         }
 
         showProgress(percent) {
-            const progressBar = document.getElementById('progress-bar');
-            const progressContainer = document.getElementById('status-progress');
-
-            if (progressBar && progressContainer) {
-                progressBar.style.width = `${Math.min(100, Math.max(0, percent))}%`;
-                progressContainer.classList.remove('hidden');
+            if (this.progressBarEl && this.progressContainerEl) {
+                this.progressBarEl.style.width = `${Math.min(100, Math.max(0, percent))}%`;
+                this.progressContainerEl.classList.remove('hidden');
                 this.progressVisible = true;
             }
         }

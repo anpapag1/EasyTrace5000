@@ -32,6 +32,31 @@
     const geomConfig = config.geometry;
     const debugConfig = config.debug;
 
+    class UnionFind {
+        constructor(size) {
+            this.parent = new Array(size);
+            this.rank = new Array(size);
+            for (let i = 0; i < size; i++) {
+                this.parent[i] = i;
+                this.rank[i] = 0;
+            }
+        }
+        find(x) {
+            while (this.parent[x] !== x) {
+                this.parent[x] = this.parent[this.parent[x]];
+                x = this.parent[x];
+            }
+            return x;
+        }
+        union(a, b) {
+            const ra = this.find(a), rb = this.find(b);
+            if (ra === rb) return;
+            if (this.rank[ra] < this.rank[rb]) this.parent[ra] = rb;
+            else if (this.rank[ra] > this.rank[rb]) this.parent[rb] = ra;
+            else { this.parent[rb] = ra; this.rank[ra]++; }
+        }
+    }
+
     const GeometryUtils = {
         PRECISION: geomConfig.coordinatePrecision,
 
@@ -98,7 +123,7 @@
             let c = r * r / (rx * rx) + h * h / (ry * ry);
             if (c > 1) { rx *= Math.sqrt(c); ry *= Math.sqrt(c) }
             const l = (rx * rx * ry * ry - rx * rx * h * h - ry * ry * r * r) / (rx * rx * h * h + ry * ry * r * r), d = (fA === fS ? -1 : 1) * Math.sqrt(Math.max(0, l)), M = d * (rx * h / ry), g = d * (-ry * r / rx), x = s * M - a * g + (p1.x + p2.x) / 2, y = a * M + s * g + (p1.y + p2.y) / 2;
-            const I = (t, p) => { const i = t[0] * p[1] - t[1] * p[0] < 0 ? -1 : 1; return i * Math.acos((t[0] * p[0] + t[1] * p[1]) / (Math.sqrt(t[0] * t[0] + t[1] * t[1]) * Math.sqrt(p[0] * p[0] + p[1] * p[1]))) };
+            const I = (t, p) => { const i = t[0] * p[1] - t[1] * p[0] < 0 ? -1 : 1; const dot = (t[0] * p[0] + t[1] * p[1]) / (Math.sqrt(t[0] * t[0] + t[1] * t[1]) * Math.sqrt(p[0] * p[0] + p[1] * p[1])); return i * Math.acos(Math.max(-1, Math.min(1, dot)));};
             const u = I([1, 0], [(r - M) / rx, (h - g) / ry]);
             let m = I([(r - M) / rx, (h - g) / ry], [(-r - M) / rx, (-h - g) / ry]);
             0 === fS && m > 0 ? m -= 2 * Math.PI : 1 === fS && m < 0 && (m += 2 * Math.PI);
@@ -1529,7 +1554,7 @@
          */
         mergeSegmentsIntoClosedPath(segments, forceClose = false, customTolerance = null) {
             if (!segments || segments.length < 2) return { success: false };
-            const precision = geomConfig.coordinatePrecision || 0.001;
+            const precision = config.precision.coordinate;
 
             this.debug('Merge input:', segments.map((s, i) => `[${i}] ${s.type}`).join(', '));
 
@@ -1563,49 +1588,70 @@
 
             // Apply the custom tolerance if provided
             const chainTolerance = customTolerance !== null ? customTolerance : (forceClose ? 0.5 : precision);
+            const chainTolSq = chainTolerance * chainTolerance;
 
             let added = true;
+            let gapCount = 0;
+            let maxGap = 0;
+
             while (added && chain.length < edges.length) {
                 added = false;
-
-                // Try appending to the tail — find closest match within tolerance
                 let bestMatch = null;
-                let bestDist = chainTolerance;
+                let bestDistSq = chainTolSq;
                 let bestDir = 'forward';
 
+                // --- Search against TAIL ---
                 for (const e of edges) {
                     if (e.used) continue;
-                    const dStart = Math.hypot(e.start.x - tail.x, e.start.y - tail.y);
-                    const dEnd = Math.hypot(e.end.x - tail.x, e.end.y - tail.y);
-                    if (dStart < bestDist) { bestDist = dStart; bestMatch = e; bestDir = 'forward'; }
-                    if (dEnd < bestDist) { bestDist = dEnd; bestMatch = e; bestDir = 'reverse'; }
+                    const dxStart = e.start.x - tail.x, dyStart = e.start.y - tail.y;
+                    const dStartSq = dxStart * dxStart + dyStart * dyStart;
+                    
+                    const dxEnd = e.end.x - tail.x, dyEnd = e.end.y - tail.y;
+                    const dEndSq = dxEnd * dxEnd + dyEnd * dyEnd;
+
+                    if (dStartSq < bestDistSq) { bestDistSq = dStartSq; bestMatch = e; bestDir = 'forward'; }
+                    if (dEndSq < bestDistSq) { bestDistSq = dEndSq; bestMatch = e; bestDir = 'reverse'; }
                 }
 
                 if (bestMatch) {
                     bestMatch.used = true;
                     chain.push({ edge: bestMatch, dir: bestDir });
                     tail = bestDir === 'forward' ? bestMatch.end : bestMatch.start;
+                    
+                    const actualDist = Math.sqrt(bestDistSq);
+                    if (actualDist > precision) gapCount++;
+                    maxGap = Math.max(maxGap, actualDist);
+                    
                     added = true;
                     continue;
                 }
 
-                // Try prepending to the head
                 bestMatch = null;
-                bestDist = chainTolerance;
+                bestDistSq = chainTolSq; 
                 bestDir = 'forward';
 
+                // --- Search against HEAD ---
                 for (const e of edges) {
                     if (e.used) continue;
-                    const dEnd = Math.hypot(e.end.x - head.x, e.end.y - head.y);
-                    const dStart = Math.hypot(e.start.x - head.x, e.start.y - head.y);
-                    if (dEnd < bestDist) { bestDist = dEnd; bestMatch = e; bestDir = 'forward'; }
-                    if (dStart < bestDist) { bestDist = dStart; bestMatch = e; bestDir = 'reverse'; }
+                    const dxEnd = e.end.x - head.x, dyEnd = e.end.y - head.y;
+                    const dEndSq = dxEnd * dxEnd + dyEnd * dyEnd;
+                    
+                    const dxStart = e.start.x - head.x, dyStart = e.start.y - head.y;
+                    const dStartSq = dxStart * dxStart + dyStart * dyStart;
+
+                    if (dEndSq < bestDistSq) { bestDistSq = dEndSq; bestMatch = e; bestDir = 'forward'; }
+                    if (dStartSq < bestDistSq) { bestDistSq = dStartSq; bestMatch = e; bestDir = 'reverse'; }
                 }
 
                 if (bestMatch) {
                     bestMatch.used = true;
                     chain.unshift({ edge: bestMatch, dir: bestDir });
                     head = bestDir === 'forward' ? bestMatch.start : bestMatch.end;
+                    
+                    const actualDist = Math.sqrt(bestDistSq);
+                    if (actualDist > precision) gapCount++;
+                    maxGap = Math.max(maxGap, actualDist);
+                    
                     added = true;
                 }
             }
@@ -1617,11 +1663,14 @@
             const gapDistance = Math.hypot(head.x - tail.x, head.y - tail.y);
             const isClosed = gapDistance <= precision;
             const isFullyChained = unchainedCount === 0;
+            
+            if (gapDistance > precision) gapCount++;
+            maxGap = Math.max(maxGap, gapDistance);
 
             if (!isFullyChained) {
                 console.warn(`[GeoUtils] Stitching failed: chained ${chain.length}/${edges.length} segments.`);
                 if (!forceClose) {
-                    return { success: false, isOpen: true, gapDistance: gapDistance, unchainedCount: unchainedCount };
+                    return { success: false, isOpen: true, gapDistance, unchainedCount, totalSegments: edges.length, chainedCount: chain.length, gapCount, maxGap };
                 }
                 // forceClose with unchained segments: proceed with partial chain
                 this.debug(`Force-closing with ${unchainedCount} unchained segment(s)`);
@@ -1630,7 +1679,7 @@
             if (!isClosed && isFullyChained) {
                 console.warn(`[GeoUtils] Stitched segments did not form a closed loop. Gap: ${gapDistance.toFixed(4)}mm`);
                 if (!forceClose) {
-                    return { success: false, isOpen: true, gapDistance: gapDistance, unchainedCount: 0 };
+                    return { success: false, isOpen: true, gapDistance, unchainedCount: 0, totalSegments: edges.length, chainedCount: chain.length, gapCount, maxGap };
                 }
                 this.debug(`Force-closing gap of ${gapDistance.toFixed(4)}mm`);
             }
@@ -1787,7 +1836,11 @@
                 isOpen: !isClosed,
                 gapDistance: gapDistance,
                 unchainedCount: unchainedCount,
-                wasForceClosed: forceClose && !isClosed
+                wasForceClosed: forceClose && !isClosed,
+                totalSegments: edges.length,
+                chainedCount: chain.length,
+                gapCount: gapCount,
+                maxGap: maxGap
             };
         },
 
@@ -1849,6 +1902,228 @@
                 arcSegments: [],
                 curveIds: contour.curveIds || []
             };
+        },
+
+        assembleCutoutCompounds(topologyResults) {
+            const outers = topologyResults.filter(r => !r.isHole);
+            const holes = topologyResults.filter(r => r.isHole);
+            const compounds = [];
+
+            for (const outer of outers) {
+                const children = holes.filter(h => h.parentIdx === outer.originalIdx);
+                const contours = [];
+
+                // Push all the inner holes FIRST
+                for (const child of children) {
+                    const hc = child.loop.contours[0];
+                    contours.push({
+                        points: hc.points, isHole: true, nestingLevel: 1,
+                        parentId: null,
+                        arcSegments: hc.arcSegments || [], curveIds: hc.curveIds || []
+                    });
+                }
+
+                // Push the outer boundary LAST
+                contours.push({
+                    points: outer.loop.contours[0].points,
+                    isHole: false, nestingLevel: 0, parentId: null,
+                    arcSegments: outer.loop.contours[0].arcSegments || [],
+                    curveIds: outer.loop.contours[0].curveIds || []
+                });
+
+                compounds.push(new PathPrimitive(contours, {
+                    isCutout: true, fill: true, stroke: false, closed: true, polarity: 'dark'
+                }));
+
+                this.debug(`Compound cutout: ${children.length} hole(s) + 1 outer`);
+            }
+
+            return compounds;
+        },
+
+        _isPrimitiveClosed(prim, tolerance) {
+            if (!prim.contours || prim.contours.length === 0) return false;
+            const pts = prim.contours[0].points;
+            if (!pts || pts.length < 3) return false;
+            const dx = pts[0].x - pts[pts.length - 1].x;
+            const dy = pts[0].y - pts[pts.length - 1].y;
+            return (dx * dx + dy * dy) < tolerance * tolerance;
+        },
+
+        _endpointsConnect(edgeA, edgeB, tolerance) {
+            const tolSq = tolerance * tolerance;
+            const test = (p1, p2) => {
+                const dx = p1.x - p2.x, dy = p1.y - p2.y;
+                return (dx * dx + dy * dy) < tolSq;
+            };
+            return test(edgeA.start, edgeB.start) || test(edgeA.start, edgeB.end) ||
+                   test(edgeA.end, edgeB.start)   || test(edgeA.end, edgeB.end);
+        },
+
+        _reverseContourWinding(contour) {
+            const n = contour.points.length;
+            contour.points.reverse();
+            if (contour.arcSegments && contour.arcSegments.length > 0) {
+                contour.arcSegments = contour.arcSegments.map(arc => ({
+                    ...arc,
+                    startIndex: (n - 1) - arc.endIndex,
+                    endIndex: (n - 1) - arc.startIndex,
+                    startAngle: arc.endAngle,
+                    endAngle: arc.startAngle,
+                    clockwise: !arc.clockwise,
+                    sweepAngle: arc.sweepAngle !== undefined ? -arc.sweepAngle : undefined
+                }));
+            }
+        },
+
+        /**
+         * Groups cutout primitives into connected components by endpoint proximity, then stitches each component into a closed loop independently.
+         */
+        extractClosedLoops(primitives, tolerance) {
+            const precision = tolerance || this.PRECISION;
+            const closed = [];
+            const open = [];
+
+            for (const prim of primitives) {
+                if (this._isPrimitiveClosed(prim, precision)) {
+                    closed.push(prim);
+                } else {
+                    open.push(prim);
+                }
+            }
+
+            this.debug(`extractClosedLoops: ${closed.length} already closed, ${open.length} open segments`);
+            if (open.length === 0) return { loops: closed, orphans: [] };
+
+            const edges = [];
+            const skipped = [];
+            for (let i = 0; i < open.length; i++) {
+                const prim = open[i];
+                let start, end;
+
+                if (prim.type === 'arc') {
+                    start = prim.startPoint;
+                    end = prim.endPoint;
+                } else {
+                    const pts = prim.contours?.[0]?.points;
+                    if (!pts || pts.length < 2) { skipped.push(prim); continue; }
+                    start = pts[0];
+                    end = pts[pts.length - 1];
+                }
+
+                if (start && end) {
+                    edges.push({ index: i, primitive: prim, start, end });
+                } else {
+                    skipped.push(prim);
+                }
+            }
+
+            if (edges.length === 0) return { loops: closed, orphans: [...skipped, ...open.filter((_, i) => !edges.some(e => e.index === i))] };
+
+            const uf = new UnionFind(edges.length);
+            for (let i = 0; i < edges.length; i++) {
+                for (let j = i + 1; j < edges.length; j++) {
+                    if (this._endpointsConnect(edges[i], edges[j], precision)) uf.union(i, j);
+                }
+            }
+
+            const components = new Map();
+            for (let i = 0; i < edges.length; i++) {
+                const root = uf.find(i);
+                if (!components.has(root)) components.set(root, []);
+                components.get(root).push(i);
+            }
+
+            this.debug(`extractClosedLoops: ${components.size} connected component(s)`);
+
+            const stitchedLoops = [];
+            const orphans = [];
+
+            for (const [, indices] of components) {
+                const componentPrims = indices.map(i => edges[i].primitive);
+                if (componentPrims.length === 1 && componentPrims[0].contours?.[0]?.points?.length < 3) {
+                    orphans.push(...componentPrims);
+                    continue;
+                }
+                const result = this.mergeSegmentsIntoClosedPath(componentPrims, false, precision);
+                if (result.success) {
+                    stitchedLoops.push(result.primitive);
+                    this.debug(`  Component: ${componentPrims.length} segments → closed loop`);
+                } else {
+                    orphans.push(...componentPrims);
+                    this.debug(`  Component: ${componentPrims.length} segments → orphans`);
+                }
+            }
+
+            return { loops: [...closed, ...stitchedLoops], orphans: [...skipped, ...orphans] };
+        },
+
+        /**
+         * Determines nesting hierarchy of closed loops via containment testing.
+         * Assigns isHole and enforces correct winding (CCW outer, CW hole).
+         */
+        classifyCutoutTopology(loops) {
+            if (!loops || loops.length === 0) return [];
+
+            if (loops.length === 1) {
+                const contour = loops[0].contours[0];
+                if (this.isClockwise(contour.points)) this._reverseContourWinding(contour);
+                contour.isHole = false;
+                contour.nestingLevel = 0;
+                return [{ loop: loops[0], isHole: false, parentIdx: null, depth: 0, originalIdx: 0 }];
+            }
+
+            const entries = loops.map((loop, idx) => {
+                const pts = loop.contours[0].points;
+                const absArea = Math.abs(this.calculateWinding(pts));
+                let rep = this.getRepresentativePoint(loop);
+
+                // Safety: if centroid falls outside a concave polygon, use longest-edge midpoint
+                if (rep && !this.pointInPolygon(rep, pts)) {
+                    let maxLenSq = 0, mid = rep;
+                    for (let i = 0; i < pts.length; i++) {
+                        const j = (i + 1) % pts.length;
+                        const dx = pts[j].x - pts[i].x, dy = pts[j].y - pts[i].y;
+                        const lenSq = dx * dx + dy * dy;
+                        if (lenSq > maxLenSq) {
+                            maxLenSq = lenSq;
+                            mid = { x: (pts[i].x + pts[j].x) / 2, y: (pts[i].y + pts[j].y) / 2 };
+                        }
+                    }
+                    rep = mid;
+                }
+
+                return { loop, originalIdx: idx, absArea, rep, parentIdx: null, depth: 0 };
+            });
+
+            // Sort by area descending — entries[j] (j < i) is always >= entries[i]
+            entries.sort((a, b) => b.absArea - a.absArea);
+
+            // Find innermost containing parent for each loop
+            for (let i = 1; i < entries.length; i++) {
+                for (let j = i - 1; j >= 0; j--) {
+                    if (this.pointInPolygon(entries[i].rep, entries[j].loop.contours[0].points)) {
+                        entries[i].parentIdx = entries[j].originalIdx;
+                        entries[i].depth = entries[j].depth + 1;
+                        break;
+                    }
+                }
+            }
+
+            // Classify and enforce winding
+            const results = entries.map(entry => {
+                const isHole = (entry.depth % 2) !== 0;
+                const contour = entry.loop.contours[0];
+                const isCW = this.isClockwise(contour.points);
+                if (isHole && !isCW) this._reverseContourWinding(contour);
+                else if (!isHole && isCW) this._reverseContourWinding(contour);
+                contour.isHole = isHole;
+                contour.nestingLevel = entry.depth;
+                return { loop: entry.loop, isHole, parentIdx: entry.parentIdx, depth: entry.depth, originalIdx: entry.originalIdx };
+            });
+
+            this.debug(`classifyCutoutTopology: ${results.filter(r => !r.isHole).length} outer(s), ${results.filter(r => r.isHole).length} hole(s)`);
+            return results;
         },
 
         debug(message, data = null) {

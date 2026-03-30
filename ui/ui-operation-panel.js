@@ -88,6 +88,10 @@
                 el.setAttribute('tabindex', idx === 0 ? '0' : '-1');
             });
 
+            // Prevent attaching multiple listeners to the same container
+            if (container.dataset.hasNavListener === 'true') return;
+            container.dataset.hasNavListener = 'true';
+
             container.addEventListener('keydown', (e) => {
                 const focused = document.activeElement;
                 if (!container.contains(focused)) return;

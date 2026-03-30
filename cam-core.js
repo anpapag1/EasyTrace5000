@@ -356,19 +356,41 @@
 
                 if (operation.type === 'cutout') {
                     if (primitives.length > 1) {
-                        const mergeResult = GeometryUtils.mergeSegmentsIntoClosedPath(primitives);
-                        if (mergeResult && mergeResult.success) {
-                            this.debug(`Merged ${primitives.length} cutout segments into 1 closed path`);
-                            primitives = [mergeResult.primitive];
-                        } else {
+                        const { loops, orphans } = GeometryUtils.extractClosedLoops(primitives);
+
+                        if (loops.length > 0) {
+                            const topology = GeometryUtils.classifyCutoutTopology(loops);
+                            const compounds = GeometryUtils.assembleCutoutCompounds(topology);
+
+                            if (compounds.length > 0) {
+                                primitives = compounds;
+                                const holeCount = topology.filter(t => t.isHole).length;
+                                this.debug(`Cutout: ${compounds.length} board(s), ${holeCount} hole(s) from ${loops.length} loop(s)`);
+                            } else {
+                                primitives = loops;
+                            }
+
+                            // Preserve loops for re-classification if orphans get resolved later
+                            if (orphans.length > 0) {
+                                operation._extractedLoops = loops;
+                            }
+                        }
+
+                        if (orphans.length > 0) {
                             operation.needsClosurePrompt = true;
-                            operation._closureInfo = {
-                                rawPrimitives: primitives
-                            };
-                            this.debug(`Cutout path failed strict merge. Flagged for UI prompt.`);
+                            operation._closureInfo = { rawPrimitives: orphans };
+                            this.debug(`${orphans.length} orphan segment(s) flagged for closure prompt`);
+                        }
+
+                    } else if (primitives.length === 1) {
+                        const pts = primitives[0].contours?.[0]?.points;
+                        if (pts && pts.length >= 3 && GeometryUtils.isClockwise(pts)) {
+                            GeometryUtils._reverseContourWinding(primitives[0].contours[0]);
+                            this.debug('Single cutout primitive reversed to CCW');
                         }
                     }
                 }
+
 
                 primitives = primitives.map(primitive => {
                     if (!primitive.properties) primitive.properties = {};
@@ -1120,110 +1142,6 @@
             });
 
             return { minX, minY, maxX, maxY };
-        }
-
-        /**
-         * Probes cutout segments with a caller-specified chaining tolerance to determine if an open path can be recovered. Does NOT modify the operation.
-         */
-        _probeRelaxedCutoutMerge(primitives, tolerance) {
-            if (!primitives || primitives.length < 2 || !tolerance || tolerance <= 0) return null;
-
-            const edges = primitives.map((seg, i) => {
-                let start, end;
-                if (seg.type === 'arc') {
-                    start = seg.startPoint;
-                    end = seg.endPoint;
-                } else if (seg.type === 'path' && seg.contours?.[0]?.points) {
-                    const pts = seg.contours[0].points;
-                    start = pts[0];
-                    end = pts[pts.length - 1];
-                }
-                return { index: i, segment: seg, start, end, used: false };
-            }).filter(e => e.start && e.end);
-
-            if (edges.length === 0) return null;
-
-            const chain = [];
-            edges[0].used = true;
-            chain.push(edges[0]);
-
-            let head = edges[0].start;
-            let tail = edges[0].end;
-            let maxGap = 0;
-            let gapCount = 0;
-            const precision = config.precision.coordinate || 0.001;
-
-            let added = true;
-            while (added && chain.length < edges.length) {
-                added = false;
-                let bestMatch = null;
-                let bestDist = tolerance;
-                let bestEnd = 'start';
-
-                for (const e of edges) {
-                    if (e.used) continue;
-                    const dStart = Math.hypot(e.start.x - tail.x, e.start.y - tail.y);
-                    const dEnd = Math.hypot(e.end.x - tail.x, e.end.y - tail.y);
-                    if (dStart < bestDist) { bestDist = dStart; bestMatch = e; bestEnd = 'start'; }
-                    if (dEnd < bestDist) { bestDist = dEnd; bestMatch = e; bestEnd = 'end'; }
-                }
-
-                if (bestMatch) {
-                    bestMatch.used = true;
-                    chain.push(bestMatch);
-                    tail = bestEnd === 'start' ? bestMatch.end : bestMatch.start;
-                    if (bestDist > precision) gapCount++;
-                    maxGap = Math.max(maxGap, bestDist);
-                    added = true;
-                    continue;
-                }
-
-                // Try prepending to head
-                bestMatch = null;
-                bestDist = tolerance;
-                bestEnd = 'end';
-
-                for (const e of edges) {
-                    if (e.used) continue;
-                    const dEnd = Math.hypot(e.end.x - head.x, e.end.y - head.y);
-                    const dStart = Math.hypot(e.start.x - head.x, e.start.y - head.y);
-                    if (dEnd < bestDist) { bestDist = dEnd; bestMatch = e; bestEnd = 'end'; }
-                    if (dStart < bestDist) { bestDist = dStart; bestMatch = e; bestEnd = 'start'; }
-                }
-
-                if (bestMatch) {
-                    bestMatch.used = true;
-                    chain.unshift(bestMatch);
-                    head = bestEnd === 'end' ? bestMatch.start : bestMatch.end;
-                    if (bestDist > precision) gapCount++;
-                    maxGap = Math.max(maxGap, bestDist);
-                    added = true;
-                }
-            }
-
-            const unchainedCount = edges.length - chain.length;
-            const closureGap = Math.hypot(head.x - tail.x, head.y - tail.y);
-            if (closureGap > precision) gapCount++;
-            maxGap = Math.max(maxGap, closureGap);
-
-            // Build the primitive via forceClose if fully chained
-            let primitive = null;
-            if (unchainedCount === 0) {
-                const forceResult = GeometryUtils.mergeSegmentsIntoClosedPath(primitives, true, tolerance);
-                if (forceResult && forceResult.success) {
-                    primitive = forceResult.primitive;
-                }
-            }
-
-            return {
-                success: unchainedCount === 0 && primitive !== null,
-                primitive: primitive,
-                totalSegments: edges.length,
-                chainedCount: chain.length,
-                unchainedCount: unchainedCount,
-                gapCount: gapCount,
-                maxGap: maxGap
-            };
         }
 
         removeOperation(operationId) {

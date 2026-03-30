@@ -167,6 +167,15 @@
                 canvas.blur();
                 document.body.focus();
             }
+
+            // Global keyboard trap: block all input while loading overlay is visible
+            const loadingOverlay = document.getElementById('loading-overlay');
+            if (loadingOverlay) {
+                loadingOverlay.addEventListener('keydown', (e) => {
+                    e.preventDefault();
+                    e.stopPropagation();
+                }, true);
+            }
         }
 
         initializeTheme() {
@@ -480,7 +489,7 @@
 
                 // Refresh the property panel to catch cross-operation constraints
                 if (this.operationPanel && this.operationPanel.currentOperation) {
-                    // Only refresh if the deleted operation wasn't the one we are looking at
+                    // Only refresh if the deleted operation wasn't the one selected
                     if (this.operationPanel.currentOperation.id !== operationId) {
                         this.operationPanel.showOperationProperties(
                             this.operationPanel.currentOperation,

@@ -888,11 +888,8 @@
         }
 
         async loadExample(exampleId) {
-            if (!exampleId) {
-                // If no ID provided, try to get from welcome modal select // Review - is this a Fallback?
-                const select = document.getElementById('pcb-example-select');
-                exampleId = select ? select.value : 'xiao';
-            }
+            const select = document.getElementById('pcb-example-select');
+            exampleId = select ? select.value : 'exampleSMD1';
 
             const example = PCB_EXAMPLES[exampleId];
             if (!example) {
@@ -1016,7 +1013,18 @@
 
                                 // Run initial probe
                                 const runProbe = (tol) => {
-                                    return this.core._probeRelaxedCutoutMerge(info.rawPrimitives, tol);
+                                    const { loops, orphans } = GeometryUtils.extractClosedLoops(info.rawPrimitives, tol);
+                                    
+                                    return {
+                                        // Only succeed if ALL segments found a home
+                                        success: orphans.length === 0 && loops.length > 0,
+                                        loops: loops,
+                                        chainedCount: info.rawPrimitives.length - orphans.length,
+                                        totalSegments: info.rawPrimitives.length,
+                                        unchainedCount: orphans.length,
+                                        gapCount: loops.length, // Rough estimate
+                                        maxGap: tol
+                                    };
                                 };
 
                                 lastProbeResult = runProbe(defaultTolerance);
@@ -1042,8 +1050,14 @@
                                     return html;
                                 };
 
+                                const extractedCount = operation._extractedLoops ? operation._extractedLoops.length : 0;
+                                const orphanCount = info.rawPrimitives.length;
+                                const contextNote = extractedCount > 0
+                                    ? `${extractedCount} closed loop(s) were extracted successfully. ${orphanCount} segment(s) could not be assigned to any closed loop.`
+                                    : `The cutout geometry in <strong>${operation.file.name}</strong> does not form a closed loop at the default precision (${(config.precision.coordinate || 0.001).toFixed(3)} mm).`;
+
                                 const bodyHTML = `
-                                    <p>The cutout geometry in <strong>${operation.file.name}</strong> does not form a closed loop at the default precision (${(config.precision.coordinate || 0.001).toFixed(3)} mm).</p>
+                                    <p>${contextNote}</p>
                                     <p>Set the maximum gap tolerance to bridge between segment endpoints:</p>
                                     <div class="closure-controls">
                                         <label for="closure-tolerance">Tolerance:</label>
@@ -1066,9 +1080,20 @@
                                         confirmText: 'Close path',
                                         cancelText: 'Keep as-is',
                                         onConfirm: async () => {
-                                            const resolved = lastProbeResult?.primitive;
-                                            if (resolved) {
-                                                operation.primitives = [resolved];
+                                            const resolvedLoops = lastProbeResult?.loops;
+                                            if (resolvedLoops && resolvedLoops.length > 0) {
+                                                // Merge with any loops that were already closed perfectly
+                                                const allLoops = operation._extractedLoops 
+                                                    ? [...operation._extractedLoops, ...resolvedLoops] 
+                                                    : resolvedLoops;
+                                                    
+                                                // Re-run topology classification to find holes inside the newly closed boards
+                                                const topology = GeometryUtils.classifyCutoutTopology(allLoops);
+                                                const compounds = GeometryUtils.assembleCutoutCompounds(topology);
+                                                
+                                                operation.primitives = compounds.length > 0 ? compounds : allLoops;
+                                                delete operation._extractedLoops;
+
                                                 operation.bounds = this.core.recalculateBounds(operation.primitives);
                                                 this.core.analyzeGeometricContext(operation, operation.primitives);
 
@@ -1083,15 +1108,21 @@
                                                 }
 
                                                 await this.ui.updateRendererAsync();
-                                                this.ui?.updateStatus('Cutout path automatically closed.', 'success');
+                                                this.ui?.updateStatus('Cutout paths automatically closed.', 'success');
                                             } else {
                                                 this.ui?.updateStatus('Cannot close — test with a higher tolerance first.', 'error');
                                             }
                                         },
+
                                         onCancel: () => {
                                             delete operation.needsClosurePrompt;
                                             delete operation._closureInfo;
-                                            this.ui?.updateStatus('Cutout left as open path.', 'info');
+                                            delete operation._extractedLoops;
+                                            const hasGeometry = operation.primitives && operation.primitives.length > 0;
+                                            this.ui?.updateStatus(
+                                                hasGeometry ? 'Orphan segments discarded. Board outlines preserved.' : 'Cutout left as open path.',
+                                                'info'
+                                            );
                                         }
                                     }
                                 );
@@ -1735,13 +1766,11 @@
             }
 
             const exporter = new LaserImageExporter();
-            let exportedCount = 0;
+            const files = [];
 
             try {
                 for (const group of layerGroups) {
                     const ext = group.format === 'png' ? '.png' : '.svg';
-
-                    // Assemble the filename using the provided baseName
                     const filename = `${baseName}${group.suffix}${ext}`;
 
                     const result = await exporter.generate(group.layers, {
@@ -1750,31 +1779,19 @@
                     });
 
                     if (result && result.blob) {
-                        const url = URL.createObjectURL(result.blob);
-                        const a = document.createElement('a');
-                        a.href = url;
-                        a.download = filename;
-                        document.body.appendChild(a);
-                        a.click();
-                        document.body.removeChild(a);
-                        URL.revokeObjectURL(url);
-                        exportedCount++;
+                        files.push({ blob: result.blob, filename });
                     }
                 }
 
-                if (exportedCount > 0) {
-                    const msg = exportedCount > 1
-                        ? `Exported ${exportedCount} laser files successfully`
-                        : `Laser ${format.toUpperCase()} exported successfully`;
-                    this.ui?.updateStatus(msg, 'success');
-                    return { success: true };
+                if (files.length > 0) {
+                    return { success: true, files };
                 }
             } catch (error) {
                 console.error('[Controller] Laser export failed:', error);
                 this.ui?.updateStatus('Laser export failed: ' + error.message, 'error');
             }
 
-            return { success: false };
+            return { success: false, files: [] };
         }
 
         // API for external access
@@ -1842,32 +1859,6 @@
             return;
         }
 
-        // Check for required core classes // REVIEW - all classes are required
-        const requiredClasses = [
-            'PCBCamCore',
-            'PCBCamUI',
-            'LayerRenderer',
-            'NavTreePanel',
-            'OperationPanel',
-            'ToolLibrary',
-            'StatusManager',
-            'UIControls'
-        ];
-
-        const missing = requiredClasses.filter(cls => typeof window[cls] === 'undefined');
-
-        if (missing.length > 0) {
-            console.error('Missing classes:', missing);
-
-            // Update loading text
-            const loadingText = document.getElementById('loading-text');
-            if (loadingText) {
-                loadingText.textContent = 'Loading error - missing modules';
-            }
-
-            return false;
-        }
-
         controller = new PCBCAMController();
         await controller.initialize();
 
@@ -1889,8 +1880,6 @@
         controller.logState();
     };
 
-    window.showCamStats = window.showPCBStats; // Alias for compatibility // Review - stats system
-
     window.enablePCBDebug = function() {
         debugConfig.enabled = true;
         console.log('Debug mode enabled');
@@ -1903,7 +1892,7 @@
 
     // Global function for HTML compatibility
     window.addFile = function(type) {
-        this.debug(`🎯 addFile('${type}') called`); // Review - emojis and icons
+        controller.debug(`addFile('${type}') called`);
 
         if (controller?.ui) {
             // Try to use the UI's file input trigger if available

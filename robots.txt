@@ -1,6 +1,7 @@
 # EasyTrace5000 - robots.txt
 
 User-agent: *
+Disallow: /*LICENSE$
 Allow: /
 
 # Primary sitemap

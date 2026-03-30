@@ -972,7 +972,10 @@
                     if (cmd.y !== null) nextPos.y = cmd.y;
                     if (cmd.z !== null) nextPos.z = cmd.z;
 
-                    const dist = Math.hypot(nextPos.x - lastPos.x, nextPos.y - lastPos.y, nextPos.z - lastPos.z);
+                    const dx = nextPos.x - lastPos.x;
+                    const dy = nextPos.y - lastPos.y;
+                    const dz = nextPos.z - lastPos.z;
+                    const dist = Math.sqrt(dx * dx + dy * dy + dz * dz);
                     let feed = 100;
 
                     if (cmd.type === 'RAPID' || cmd.type === 'RETRACT') {

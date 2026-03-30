@@ -488,7 +488,7 @@
                 const stepDistance = toolDiameter * (1.0 - stepOverRatio);
 
                 // Threshold is the expected step distance plus a small tolerance
-                const tolerance = 0.1 * toolDiameter; // e.g., 10% of tool diameter // Review - I don't trust this tollerance.
+                const tolerance = config.precision.coordinate;
                 const staydownThreshold = stepDistance + tolerance;
 
                 this.debug(`Plan ${planMetadata.operationId} (Pass ${planMetadata.pass || 1}): ToolD=${toolDiameter.toFixed(3)}, StepOver=${stepOverPercent}%, StepDist=${stepDistance.toFixed(3)}, Threshold=${staydownThreshold.toFixed(3)}`);
@@ -599,13 +599,15 @@
                     const radius = Math.hypot(arcCmd.i, arcCmd.j);
                     const vecX = fromPos.x - centerX;
                     const vecY = fromPos.y - centerY;
-                    const vecMag = Math.hypot(vecX, vecY);
+                    const vecMag = Math.sqrt(vecX * vecX + vecY * vecY);
 
                     if (vecMag > 1e-6) {
                         const idealX = centerX + (vecX / vecMag) * radius;
                         const idealY = centerY + (vecY / vecMag) * radius;
                         const idealPos = { x: idealX, y: idealY};
-                        const dist = Math.hypot(idealX - fromPos.x, idealY - fromPos.y);
+                        const dxIdeal = idealX - fromPos.x;
+                        const dyIdeal = idealY - fromPos.y;
+                        const dist = Math.sqrt(dxIdeal * dxIdeal + dyIdeal * dyIdeal);
                         return { point: idealPos, distance: dist, commandIndex: 0 };
                     }
                 }
@@ -615,7 +617,9 @@
             const canRotate = meta.isClosedLoop;
 
             let bestPoint = meta.entryPoint || { x: 0, y: 0, z: 0 };
-            let bestDist = Math.hypot(bestPoint.x - fromPos.x, bestPoint.y - fromPos.y);
+            const dxEntry = bestPoint.x - fromPos.x;
+            const dyEntry = bestPoint.y - fromPos.y;
+            let bestDist = Math.sqrt(dxEntry * dxEntry + dyEntry * dyEntry);
             let bestIndex = 0;
 
             if (!plan.commands || plan.commands.length === 0) {
@@ -665,10 +669,9 @@
             const originalEntryPoint = plan.metadata.entryPoint;
             const lastCmd = plan.commands[plan.commands.length - 1];
 
-            const distToOriginalEntry = Math.hypot(
-                (lastCmd.x || 0) - originalEntryPoint.x,
-                (lastCmd.y || 0) - originalEntryPoint.y
-            );
+            const dx = (lastCmd.x || 0) - originalEntryPoint.x;
+            const dy = (lastCmd.y || 0) - originalEntryPoint.y;
+            const distToOriginalEntry = Math.sqrt(dx * dx + dy * dy);
 
             const newCommands = [...postPivot];
 
@@ -718,7 +721,7 @@
 
             const dx = fromPos.x - center.x;
             const dy = fromPos.y - center.y;
-            const distToCenter = Math.hypot(dx, dy);
+            const distToCenter = Math.sqrt(dx * dx + dy * dy);
 
             if (distToCenter < 1e-6) return;
 
@@ -783,13 +786,12 @@
                 // Check for ignorable, non-linear commands
                 let isIgnorableArc = false;
                 if (cmd.type === 'ARC_CW' || cmd.type === 'ARC_CCW') {
-                    // Check the arc length of the arc (straight line from start to end)
                     const arcLength = Math.hypot(cmdTargetPos.x - currentPos.x, cmdTargetPos.y - currentPos.y);
-                    
-                    // Check if this is a helical arc (changing Z)
-                    const isHelical = cmd.z !== null && Math.abs(cmd.z - currentPos.z) > 1e-6; // epsilon is in config
+                    const arcRadius = Math.hypot(cmd.i || 0, cmd.j || 0); // Check the radius
+                    const isHelical = cmd.z !== null && Math.abs(cmd.z - currentPos.z) > 1e-6;
 
-                    if (arcLength < 0.01 && !isHelical) {  // Don't ignore helical arcs
+                    // It's only ignorable if BOTH the chord length AND the radius are tiny.
+                    if (arcLength < 0.01 && arcRadius < 0.01 && !isHelical) {  
                         isIgnorableArc = true;
                     }
                 }
@@ -834,7 +836,9 @@
                     let isNextIgnorableArc = false;
                     if (nextCmd.type === 'ARC_CW' || nextCmd.type === 'ARC_CCW') {
                         const arcLength = Math.hypot(nextCmdTargetPos.x - sequenceEndPoint.x, nextCmdTargetPos.y - sequenceEndPoint.y);
-                        if (arcLength < 0.01) {
+                        const nextArcRadius = Math.hypot(nextCmd.i || 0, nextCmd.j || 0); // Check the radius
+                        
+                        if (arcLength < 0.01 && nextArcRadius < 0.01) {
                             isNextIgnorableArc = true;
                         }
                     }
@@ -983,35 +987,30 @@
         perpendicularDistance(point, lineStart, lineEnd) {
             const dx = lineEnd.x - lineStart.x;
             const dy = lineEnd.y - lineStart.y;
-            const dz = lineEnd.z - lineStart.z; // Review - Why check 3d space? optimizer shouldn't have access to depth data?
 
-            const lengthSquared = (dx * dx) + (dy * dy) + (dz * dz);
+            const lengthSquared = (dx * dx) + (dy * dy);
 
             if (lengthSquared < 1e-12) { // Line segment is a point
                 return Math.hypot(
                     point.x - lineStart.x,
-                    point.y - lineStart.y,
-                    point.z - lineStart.z
+                    point.y - lineStart.y
                 );
             }
-
+            
             // Parameter t of projection onto line
             let t = ((point.x - lineStart.x) * dx +
-                     (point.y - lineStart.y) * dy +
-                     (point.z - lineStart.z) * dz) / lengthSquared;
+                    (point.y - lineStart.y) * dy) / lengthSquared;
             
             t = Math.max(0, Math.min(1, t)); // Clamp t to [0, 1] for a line segment
 
             // Projected point
             const projX = lineStart.x + t * dx;
             const projY = lineStart.y + t * dy;
-            const projZ = lineStart.z + t * dz;
 
             // Distance from point to projection
             return Math.hypot(
                 point.x - projX,
-                point.y - projY,
-                point.z - projZ
+                point.y - projY
             );
         }
 
