@@ -458,6 +458,8 @@
             }
         }
 
+        showQuickstartHandler(options = {}) {
+            const modal = this.modals.quickstart;
 
             // Get the modal content wrapper (to apply the mode class)
             const modalContent = modal.querySelector('.modal-content');
