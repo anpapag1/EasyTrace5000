@@ -329,7 +329,7 @@
                     // If opening #support, always open Welcome first so it sits underneath.
                     // This ensures closing Support reveals the main menu, not an empty void.
                     if (hash === 'support') {
-                        this.modalManager.showModal('welcome', { examples: PCB_EXAMPLES });
+                        this.modalManager.showModal('quickstart', { examples: PCB_EXAMPLES });
                     }
 
                     // Open the requested deep-link modal on top
@@ -340,7 +340,7 @@
                 } 
                 else {
                     // Standard Boot: always show Welcome.
-                    this.modalManager.showModal('welcome', { examples: PCB_EXAMPLES });
+                    this.modalManager.showModal('quickstart', { examples: PCB_EXAMPLES });
                 }
 
                 this.initState.fullyReady = true;

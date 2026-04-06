@@ -942,164 +942,6 @@
         </div>
     </template>
 
-    <!-- Welcome Modal -->
-    <div id="welcome-modal" class="modal">
-        <div class="modal-content">
-            <div class="modal-header">
-                <h2>Welcome to EasyTrace5000</h2>
-                <button class="modal-close" id="welcome-close" aria-label="Close">
-                    <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">
-                        <line x1="18" y1="6" x2="6" y2="18"></line>
-                        <line x1="6" y1="6" x2="18" y2="18"></line>
-                    </svg>
-                </button>
-            </div>
-            <div class="modal-body">
-                <div class="viewport-warning viewport-warning--info" id="welcome-viewport-warning">
-                    <svg class="viewport-warning-icon" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-                        <rect x="5" y="2" width="14" height="20" rx="2"/>
-                        <path d="M12 18h.01"/>
-                    </svg>
-                    <div class="viewport-warning-content">
-                        <strong>Screen too narrow. If possible, rotate your device or switch to a larger screen.</strong>
-                        <span>UI is optimized for small screens but only in a horizontal orientation.</span>
-                    </div>
-                </div>
-
-                <p class="welcome-intro">EasyTrace5000 is a CAM tool for PCB fabrication.<br>It's 100% web-based, client-side, open-source, and free to use.</p>
-
-                <p class="pipeline-subtitle">Select your PCB manufacturing workflow</p>
-
-                <div class="pipeline-selection">
-                    <a href="#quickstart" class="pipeline-card pipeline-card--active" id="pipeline-cnc" draggable="false" aria-label="Select CNC Milling Pipeline">
-                        <div class="pipeline-icon" aria-hidden="true">
-                            <svg width="48" height="48" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" aria-hidden="true">
-                                <circle cx="12" cy="12" r="3"/>
-                                <path d="M12 2v4M12 18v4M4.93 4.93l2.83 2.83M16.24 16.24l2.83 2.83M2 12h4M18 12h4M4.93 19.07l2.83-2.83M16.24 7.76l2.83-2.83"/>
-                            </svg>
-                        </div>
-                        <h3>CNC Milling</h3>
-                        <span class="pipeline-badge pipeline-badge--stable">Ready</span>
-                        <p class="pipeline-desc">G-code generation for isolation routing, drilling, copper clearing, and board cutout.</p>
-                        <span class="pipeline-action" aria-hidden="true">Start with CNC</span>
-                    </a>
-
-                    <a href="#laser-config" class="pipeline-card pipeline-card--active" id="pipeline-laser" draggable="false" aria-label="Select Laser Processing Pipeline">
-                        <div class="pipeline-icon" aria-hidden="true">
-                            <svg width="48" height="48" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" aria-hidden="true">
-                                <path d="M12 2v8"/>
-                                <path d="M12 14v8"/>
-                                <circle cx="12" cy="12" r="2"/>
-                                <path d="M4.93 4.93l4.24 4.24"/>
-                                <path d="M14.83 14.83l4.24 4.24"/>
-                            </svg>
-                        </div>
-                        <h3>Laser Processing</h3>
-                        <span class="pipeline-badge pipeline-badge--dev">Under Development</span>
-                        <p class="pipeline-desc">Vector/raster output for ablation and stencils. Maybe drill/cutout (UV) and soldering (Fiber)?</p>
-                        <span class="pipeline-action" aria-hidden="true">Start with Laser</span>
-                    </a>
-                </div>
-
-                <div class="sponsors-section">
-                    <h4>Project Sponsors</h4>
-                    <div class="sponsor-grid">
-                        <a href="#" class="sponsor-slot" id="sponsor-slot-1" draggable="false" aria-label="Sponsor Slot Available">
-                            <div class="slot-content">
-                                <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" aria-hidden="true">
-                                    <path d="M12 5v14M5 12h14"/>
-                                </svg>
-                                <span style="margin-top: 4px;">Your Logo</span>
-                            </div>
-                        </a>
-                        <a href="#" class="sponsor-slot" id="sponsor-slot-2" draggable="false" aria-label="Sponsor Slot Available">
-                            <div class="slot-content">
-                                <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" aria-hidden="true">
-                                    <path d="M12 5v14M5 12h14"/>
-                                </svg>
-                                <span style="margin-top: 4px;">Your Logo</span>
-                            </div>
-                        </a>
-                        <a href="#" class="sponsor-slot" id="sponsor-slot-3" draggable="false" aria-label="Sponsor Slot Available">
-                            <div class="slot-content">
-                                <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" aria-hidden="true">
-                                    <path d="M12 5v14M5 12h14"/>
-                                </svg>
-                                <span style="margin-top: 4px;">Your Logo</span>
-                            </div>
-                        </a>
-                    </div>
-                    <a href="#support" class="sponsor-cta" id="sponsor-contact-cta" draggable="false" aria-label="Opens the Support Project modal">Learn about becoming a sponsor</a>
-                </div>
-            </div>
-            <div class="modal-footer welcome-footer">
-                <div class="welcome-footer-links">
-                    <a href="#help" id="welcome-help-link" draggable="false" aria-label="Opens Help modal">Help</a>
-                    <span class="separator" aria-hidden="true"></span>
-                    <a href="../LICENSE" target="_blank" draggable="false" aria-label="AGPLv3 License (opens in a new tab)">AGPLv3</a>
-                    <span class="separator" aria-hidden="true"></span>
-                    <a href="doc/" target="_blank" draggable="false" aria-label="Documentation (opens in a new tab)">Documentation</a>
-                    <span class="separator" aria-hidden="true"></span>
-                    <a href="https://github.com/RicardoJCMarques/EasyTrace5000" target="_blank" draggable="false" aria-label="GitHub Repository (opens in a new tab)">GitHub</a>
-                </div>
-            </div>
-        </div>
-    </div>
-
-    <!-- Laser Configuration Modal -->
-    <div id="laser-config-modal" class="modal">
-        <div class="modal-content">
-            <div class="modal-header">
-                <h2>Select Laser Type</h2>
-                <button class="modal-close" id="laser-config-close" aria-label="Close">
-                    <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">
-                        <line x1="18" y1="6" x2="6" y2="18"></line>
-                        <line x1="6" y1="6" x2="18" y2="18"></line>
-                    </svg>
-                </button>
-            </div>
-            <div class="modal-body">
-                <p class="welcome-intro">Select your laser type. The same PCB files are used — only the output format changes.</p>
-
-                <div class="pipeline-selection">
-                    <a href="#" class="pipeline-card pipeline-card--active" id="laser-select-uv" draggable="false" aria-label="Select UV Laser">
-                        <div class="pipeline-icon" aria-hidden="true">
-                            <svg width="48" height="48" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" aria-hidden="true">
-                                <path d="M12 2v8"/><path d="M12 14v8"/><circle cx="12" cy="12" r="2"/>
-                                <path d="M4.93 4.93l4.24 4.24"/><path d="M14.83 14.83l4.24 4.24"/>
-                            </svg>
-                        </div>
-                        <h3>UV Laser</h3>
-                        <span class="pipeline-badge pipeline-badge--dev">Full Laser Pipeline</span>
-                        <p class="pipeline-desc">All operations via laser — copper ablation, drilling, clearing, and board cutout.</p>
-                        <span class="pipeline-action" aria-hidden="true">Select UV</span>
-                    </a>
-
-                    <a href="#" class="pipeline-card pipeline-card--active" id="laser-select-fiber" draggable="false" aria-label="Select Fiber Laser">
-                        <div class="pipeline-icon" aria-hidden="true">
-                            <svg width="48" height="48" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" aria-hidden="true">
-                                <circle cx="12" cy="12" r="4"/>
-                                <path d="M12 2v4"/><path d="M12 18v4"/>
-                                <path d="M2 12h4"/><path d="M18 12h4"/>
-                            </svg>
-                        </div>
-                        <h3>Fiber Laser</h3>
-                        <span class="pipeline-badge pipeline-badge--dev">Coming Soon</span>
-                        <p class="pipeline-desc">Laser for isolation and clearing. CNC G-code for drilling and board cutout.</p>
-                        <span class="pipeline-action" aria-hidden="true">Locked, try UV</span>
-                    </a>
-                </div>
-
-                <p class="laser-diode-note">
-                    <small><strong>Diode lasers / G-code lasers:</strong> If your laser uses standard G-code (e.g. GRBL-LPC, Marlin), use the CNC pipeline with a laser-compatible post-processor. The laser pipeline outputs vector/raster files for standalone laser software (LightBurn, RDWorks, LaserGRBL).</small>
-                </p>
-            </div>
-            <div class="modal-footer">
-                <button class="btn btn--secondary" id="laser-config-back-btn">Back</button>
-            </div>
-        </div>
-    </div>
-
     <!-- Quickstart Modal -->
     <div id="quickstart-modal" class="modal">
         <div class="modal-content">
@@ -1199,7 +1041,6 @@
                 </div>
             </div>
             <div class="modal-footer quickstart-footer">
-                <button class="btn btn--secondary" id="quickstart-back-btn" aria-label="Return to Welcome modal">Back</button>
                 <label class="checkbox-label">
                     <input type="checkbox" id="dont-show-quickstart">
                     <span>Don't show this again</span>
@@ -1594,7 +1435,6 @@
     <script defer src="../geometry/geometry-clipper-wrapper.js"></script>
     <script defer src="../geometry/geometry-utils.js"></script>
     <script defer src="../geometry/geometry-utils-math.js"></script>
-    <script defer src="../geometry/geometry-utils-hatching.js"></script>
     <script defer src="../geometry/geometry-offsetter.js"></script>
     <script defer src="../geometry/geometry-offsetter-analytic.js"></script>
     <script defer src="../parsers/primitives.js"></script>
@@ -1631,7 +1471,6 @@
     <script defer src="../export/processors/mach3-processor.js"></script>
     <script defer src="../export/processors/linuxcnc-processor.js"></script>
     <script defer src="../export/gcode-generator.js"></script>
-    <script defer src="../export/laser-image-exporter.js"></script>
     <script defer src="../utils/coordinate-system.js"></script>
     <script defer src="../utils/canvas-exporter.js"></script>
     <script defer src="../cam-core.js"></script>

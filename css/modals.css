@@ -162,8 +162,8 @@
 }
 
 .pipeline-selection {
-    display: grid;
-    grid-template-columns: repeat(2, 1fr);
+    display: flex;
+    flex-wrap: wrap;
     gap: var(--modal-gap);
     margin-bottom: var(--modal-gap);
 }

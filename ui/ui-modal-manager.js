@@ -44,8 +44,6 @@
 
             // Modal references
             this.modals = {
-                welcome: document.getElementById('welcome-modal'),
-                laserConfig: document.getElementById('laser-config-modal'),
                 quickstart: document.getElementById('quickstart-modal'),
                 exportManager: document.getElementById('exporter-manager-modal'),
                 support: document.getElementById('support-modal'),
@@ -332,21 +330,9 @@
             const modalName = this.getActiveModalName();
 
             switch (modalName) {
-                case 'welcome':
-                    // Welcome -> transition to quickstart (same as clicking outside)
-                    this.handleClickOutside('welcome');
-                    break;
-
                 case 'quickstart':
-                    // Quickstart -> go back to welcome
+                    // Quickstart -> close modal
                     this.closeModal();
-                    this.showModal('welcome');
-                    break;
-
-                case 'laserConfig':
-                    // laserConfig -> go back to welcome
-                    this.closeModal();
-                    this.showModal('welcome');
                     break;
 
                 case 'support':
@@ -379,76 +365,6 @@
                 }
             }
             return null;
-        }
-
-        showLaserConfigHandler(options = {}) {
-            const modal = this.modals.laserConfig;
-            if (!modal) return;
-
-            // UV card — full laser pipeline
-            const uvCard = document.getElementById('laser-select-uv');
-            if (uvCard) {
-                uvCard.onclick = (e) => {
-                    e.preventDefault();
-                    const laserConfig = {
-                        laserType: 'uv',
-                        outputFormat: D.laser.exportFormat,
-                        layerColors: { ...(D.laser.layerColors) }
-                    };
-                    this.controller.setPipeline('laser', laserConfig);
-
-                    if (this.ui.controls) {
-                        this.ui.controls.updatePipelineFieldVisibility();
-                    }
-
-                    this.closeModal();
-                    this.showModal('quickstart', options);
-                };
-            }
-
-            // Fiber card — hybrid pipeline
-            const fiberCard = document.getElementById('laser-select-fiber');
-            if (fiberCard) {
-                fiberCard.onclick = (e) => {
-                    e.preventDefault();
-
-                    // --- HYBRID LOCK ---
-                    this.ui.showStatus('Hybrid pipeline is currently locked for testing.', 'info');
-                    return; 
-                    // -------------------
-
-                    /* COMMENTED OUT UNTIL ALL LASER OPERATIONS ARE THOROUGHLY TESTED:
-                    const laserConfig = {
-                        laserType: 'fiber',
-                        outputFormat: D.laser.exportFormat || 'svg',
-                        layerColors: { ...(D.laser.layerColors || {}) }
-                    };
-                    this.controller.setPipeline('hybrid', laserConfig);
-
-                    if (this.ui.controls) {
-                        this.ui.controls.updatePipelineFieldVisibility();
-                    }
-
-                    this.closeModal();
-                    this.showModal('quickstart', options);
-                    */
-                };
-            }
-
-            // Back button
-            const backBtn = document.getElementById('laser-config-back-btn');
-            if (backBtn) {
-                backBtn.onclick = () => {
-                    this.closeModal();
-                    this.showModal('welcome');
-                };
-            }
-
-            // Close button
-            const closeBtn = document.getElementById('laser-config-close');
-            if (closeBtn) {
-                closeBtn.onclick = () => this.closeModal();
-            }
         }
 
         showSupportHandler() {
@@ -542,69 +458,6 @@
             }
         }
 
-        showWelcomeHandler(options) {
-            const modal = this.modals.welcome;
-
-            // CNC card
-            const cncCard = document.getElementById('pipeline-cnc');
-            if (cncCard) {
-                cncCard.onclick = (e) => {
-                    e.preventDefault();
-                    this.selectedPipeline = 'cnc';
-                    this.controller.setPipeline('cnc');
-                    this.closeModal();
-
-                    const hideWelcome = localStorage.getItem(storageKeys.hideWelcome);
-                    if (!hideWelcome) {
-                        this.showModal('quickstart', options);
-                    }
-                };
-            }
-
-            // Laser card - opens laser config modal
-            const laserCard = document.getElementById('pipeline-laser');
-            if (laserCard) {
-                laserCard.onclick = (e) => {
-                    e.preventDefault();
-                    this.selectedPipeline = 'laser';
-                    this.closeModal();
-
-                    const hideWelcome = localStorage.getItem(storageKeys.hideWelcome);
-                    if (!hideWelcome) {
-                        this.showModal('laserConfig', options);
-                    }
-                };
-            }
-
-            // Sponsor slots and CTA
-            ['sponsor-slot-1', 'sponsor-slot-2', 'sponsor-slot-3', 'sponsor-contact-cta'].forEach(id => {
-                const el = document.getElementById(id);
-                if (el) {
-                    el.onclick = (e) => {
-                        e.preventDefault();
-                        this.showModal('support');
-                    };
-                }
-            });
-
-            // Help link in footer
-            const helpLink = document.getElementById('welcome-help-link');
-            if (helpLink) {
-                helpLink.onclick = (e) => {
-                    e.preventDefault();
-                    this.showModal('help');
-                };
-            }
-
-            // Close button - same behavior as click-outside
-            const closeBtn = modal?.querySelector('.modal-close');
-            if (closeBtn) {
-                closeBtn.onclick = () => this.handleClickOutside('welcome');
-            }
-        }
-
-        showQuickstartHandler(options = {}) {
-            const modal = this.modals.quickstart;
 
             // Get the modal content wrapper (to apply the mode class)
             const modalContent = modal.querySelector('.modal-content');
@@ -680,19 +533,6 @@
             const startEmptyBtn = document.getElementById('start-empty-btn');
             if (startEmptyBtn) {
                 startEmptyBtn.onclick = () => this.handleQuickstartClose();
-            }
-
-            // Back button — pipeline-aware
-            const backBtn = document.getElementById('quickstart-back-btn');
-            if (backBtn) {
-                backBtn.onclick = () => {
-                    this.closeModal();
-                    if (this.selectedPipeline === 'laser') {
-                        this.showModal('laserConfig');
-                    } else {
-                        this.showModal('welcome');
-                    }
-                };
             }
 
             // Close button
